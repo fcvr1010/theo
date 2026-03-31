@@ -23,17 +23,11 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._ext import execute, load_vector_ext
-from theo.graph._schema import PK_MAP, TABLES
+from theo.graph._ext import execute, get_next_list, load_vector_ext
+from theo.graph._schema import INDEX_MAP, PK_MAP, TABLES
 from theo.graph.embed_text import EMBEDDING_DIM, embed_query
 
 _log = get_logger("semantic_search")
-
-# HNSW index names (must match manage_indexes.py convention).
-_INDEX_MAP = {
-    "Concept": "concept_emb_idx",
-    "SourceFile": "sourcefile_emb_idx",
-}
 
 _MAX_NOTES_LEN = 200
 
@@ -53,7 +47,7 @@ def _hnsw_search(
     top_k: int,
 ) -> list[dict[str, Any]] | None:
     """Try HNSW search on a single table.  Returns None if no index exists."""
-    idx_name = _INDEX_MAP[table]
+    idx_name = INDEX_MAP[table]
     pk_field = PK_MAP[table]
     try:
         result = execute(
@@ -71,7 +65,7 @@ def _hnsw_search(
     cols: list[str] = result.get_column_names()
     matches: list[dict[str, Any]] = []
     while result.has_next():
-        row = dict(zip(cols, result.get_next(), strict=True))
+        row = dict(zip(cols, get_next_list(result), strict=True))
         matches.append(
             {
                 "table": table,
@@ -107,7 +101,7 @@ def _brute_force_search(
     cols: list[str] = result.get_column_names()
     matches: list[dict[str, Any]] = []
     while result.has_next():
-        row = dict(zip(cols, result.get_next(), strict=True))
+        row = dict(zip(cols, get_next_list(result), strict=True))
         matches.append(
             {
                 "table": table,
@@ -139,7 +133,7 @@ def _collect_rows(result: lb.QueryResult) -> list[dict[str, Any]]:
     cols: list[str] = result.get_column_names()
     rows: list[dict[str, Any]] = []
     while result.has_next():
-        rows.append(dict(zip(cols, result.get_next(), strict=True)))
+        rows.append(dict(zip(cols, get_next_list(result), strict=True)))
     return rows
 
 
@@ -149,8 +143,11 @@ def _expand_matches(
 ) -> dict[str, Any]:
     """Follow graph edges from matched nodes to build neighbourhood context.
 
-    Uses batched queries (WHERE id IN $ids) instead of per-node loops to
-    reduce the number of round-trips from O(3*N) to O(3).
+    Expands both Concept and SourceFile matches:
+    - Concept matches: follow DependsOn, InteractsWith (both directions),
+      and find files via BelongsTo.
+    - SourceFile matches: follow BelongsTo to find parent concepts,
+      and Imports (both directions) to find related files.
     """
     matched_concept_ids: set[str] = set()
     matched_file_paths: set[str] = set()
@@ -164,12 +161,12 @@ def _expand_matches(
     related_concepts: dict[str, dict[str, Any]] = {}
     related_files: dict[str, dict[str, Any]] = {}
 
+    # --- Expand from Concept matches ---
     if matched_concept_ids:
         id_list = list(matched_concept_ids)
 
-        # Expand concepts: DependsOn and InteractsWith (both directions).
+        # DependsOn and InteractsWith (both directions).
         for rel in ("DependsOn", "InteractsWith"):
-            # Outgoing edges.
             for row in _collect_rows(
                 execute(
                     conn,
@@ -186,7 +183,6 @@ def _expand_matches(
                         "description": row["description"] or "",
                     }
 
-            # Incoming edges.
             for row in _collect_rows(
                 execute(
                     conn,
@@ -211,6 +207,60 @@ def _expand_matches(
                 "WHERE c.id IN $ids "
                 "RETURN f.path AS path, f.name AS name, f.description AS description",
                 {"ids": id_list},
+            )
+        ):
+            if row["path"] not in matched_file_paths:
+                related_files[row["path"]] = {
+                    "path": row["path"],
+                    "name": row["name"],
+                    "description": row["description"] or "",
+                }
+
+    # --- Expand from SourceFile matches ---
+    if matched_file_paths:
+        path_list = list(matched_file_paths)
+
+        # Concepts that matched files belong to (outgoing BelongsTo).
+        for row in _collect_rows(
+            execute(
+                conn,
+                "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) "
+                "WHERE f.path IN $paths "
+                "RETURN c.id AS id, c.name AS name, c.description AS description",
+                {"paths": path_list},
+            )
+        ):
+            if row["id"] not in matched_concept_ids:
+                related_concepts[row["id"]] = {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "description": row["description"] or "",
+                }
+
+        # Files connected via Imports (both directions).
+        for row in _collect_rows(
+            execute(
+                conn,
+                "MATCH (a:SourceFile)-[:Imports]->(b:SourceFile) "
+                "WHERE a.path IN $paths "
+                "RETURN b.path AS path, b.name AS name, b.description AS description",
+                {"paths": path_list},
+            )
+        ):
+            if row["path"] not in matched_file_paths:
+                related_files[row["path"]] = {
+                    "path": row["path"],
+                    "name": row["name"],
+                    "description": row["description"] or "",
+                }
+
+        for row in _collect_rows(
+            execute(
+                conn,
+                "MATCH (a:SourceFile)-[:Imports]->(b:SourceFile) "
+                "WHERE b.path IN $paths "
+                "RETURN a.path AS path, a.name AS name, a.description AS description",
+                {"paths": path_list},
             )
         ):
             if row["path"] not in matched_file_paths:

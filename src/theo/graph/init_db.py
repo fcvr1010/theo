@@ -16,6 +16,8 @@ from typing import Any
 
 import real_ladybug as lb
 
+from theo.graph._schema import ALLOWED_REL_TYPES, TABLES
+
 
 def init_db(db_path: str) -> dict[str, Any]:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -54,16 +56,15 @@ def init_db(db_path: str) -> dict[str, Any]:
         "FROM SourceFile TO SourceFile, description STRING)",
     ]
 
-    tables: list[str] = []
     for stmt in stmts:
         conn.execute(stmt)
-        # Extract table name for reporting.
-        for keyword in ("TABLE", "table"):
-            if keyword in stmt:
-                parts = stmt.split(keyword, 1)[1].strip().split("(", 1)
-                name = parts[0].strip().split()[-1]
-                tables.append(name)
-                break
+
+    del conn
+    db.close()
+
+    # Return table names from the canonical schema constants rather than
+    # parsing them out of DDL strings.
+    tables = list(TABLES) + sorted(ALLOWED_REL_TYPES)
 
     return {"status": "ok", "tables": tables}
 

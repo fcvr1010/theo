@@ -2,23 +2,10 @@
 
 from __future__ import annotations
 
-import io
-import sys
-from collections.abc import Generator
-from unittest.mock import patch
-
 import pytest
 
 from theo import __version__
 from theo.cli import main
-
-
-@pytest.fixture()
-def capture_stderr() -> Generator[io.StringIO, None, None]:
-    """Capture stderr via a StringIO buffer."""
-    buf = io.StringIO()
-    with patch.object(sys, "stderr", buf):
-        yield buf
 
 
 class TestCli:

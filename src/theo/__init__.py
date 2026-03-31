@@ -41,7 +41,7 @@ def get_logger(name: str) -> logging.Logger:
             if not _handler_installed:
                 log_path = _log_dir() / "theo-ops.log"
                 log_path.parent.mkdir(parents=True, exist_ok=True)
-                handler = RotatingFileHandler(str(log_path), maxBytes=1_000_000, backupCount=3)
+                handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3)
                 handler.setFormatter(
                     logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
                 )

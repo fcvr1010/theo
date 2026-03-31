@@ -18,6 +18,10 @@ from theo.graph._ext import execute
 
 _log = get_logger("query")
 
+# Conservative guard: rejects queries containing mutation keywords.
+# Note: this can produce false positives for string literals containing these
+# keywords (e.g. WHERE n.x CONTAINS 'SET').  This is an intentional trade-off
+# favouring safety -- the query tool should only be used for genuine reads.
 _MUTATING_RE = re.compile(r"\b(CREATE|MERGE|DELETE|DETACH|SET|REMOVE|DROP)\b", re.IGNORECASE)
 
 

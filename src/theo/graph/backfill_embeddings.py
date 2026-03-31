@@ -62,7 +62,7 @@ def backfill_embeddings(db_path: str, force: bool = False) -> dict[str, Any]:
         # Collect rows in memory (needed for batch embedding).
         rows: list[dict[str, Any]] = []
         while result.has_next():
-            rows.append(dict(zip(cols, result.get_next(), strict=True)))
+            rows.append(dict(zip(cols, get_next_list(result), strict=True)))
 
         to_embed += len(rows)
 

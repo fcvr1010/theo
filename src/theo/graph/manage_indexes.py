@@ -17,14 +17,9 @@ import real_ladybug as lb
 
 from theo import get_logger
 from theo.graph._ext import load_vector_ext
+from theo.graph._schema import INDEX_SPECS
 
 _log = get_logger("manage_indexes")
-
-# Convention: {table_lower}_emb_idx
-_INDEX_SPECS: list[tuple[str, str]] = [
-    ("Concept", "concept_emb_idx"),
-    ("SourceFile", "sourcefile_emb_idx"),
-]
 
 
 def create_vector_indexes(db_path: str) -> dict[str, Any]:
@@ -41,7 +36,7 @@ def create_vector_indexes(db_path: str) -> dict[str, Any]:
     load_vector_ext(conn)
 
     created: list[str] = []
-    for table, idx_name in _INDEX_SPECS:
+    for table, idx_name in INDEX_SPECS:
         # Drop if it already exists (CREATE is not idempotent in KuzuDB).
         try:
             conn.execute(f"CALL DROP_VECTOR_INDEX('{table}', '{idx_name}')")
@@ -79,7 +74,7 @@ def drop_vector_indexes(db_path: str) -> dict[str, Any]:
     load_vector_ext(conn)
 
     dropped: list[str] = []
-    for table, idx_name in _INDEX_SPECS:
+    for table, idx_name in INDEX_SPECS:
         try:
             conn.execute(f"CALL DROP_VECTOR_INDEX('{table}', '{idx_name}')")
             dropped.append(idx_name)

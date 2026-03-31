@@ -8,16 +8,14 @@ Returns: {status: "ok", rel_type, from: from_id, to: to_id}
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._schema import ALLOWED_REL_TYPES, ALLOWED_TABLES, PK_MAP
+from theo.graph._schema import ALLOWED_REL_TYPES, ALLOWED_TABLES, FIELD_RE, PK_MAP
 
 _log = get_logger("upsert_rel")
-_FIELD_RE = re.compile(r"^[a-z_][a-z0-9_]*$", re.IGNORECASE)
 
 
 def upsert_rel(
@@ -37,7 +35,7 @@ def upsert_rel(
         raise ValueError(f"Invalid to_table: {to_table!r}")
     if properties:
         for k in properties:
-            if not _FIELD_RE.match(k):
+            if not FIELD_RE.match(k):
                 raise ValueError(f"Invalid field name: {k!r}")
 
     _log.info("[WRITE] Upsert rel: %s -[%s]-> %s", from_id, rel_type, to_id)
@@ -65,6 +63,9 @@ def upsert_rel(
         f"MERGE (a)-[r:{rel_type}]->(b) {set_clause}"
     )
     conn.execute(cypher, params)
+
+    del conn
+    db.close()
 
     return {"status": "ok", "rel_type": rel_type, "from": from_id, "to": to_id}
 
