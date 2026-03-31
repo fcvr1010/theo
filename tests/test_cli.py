@@ -51,6 +51,13 @@ class TestCli:
         exit_code = main(["remove"])
         assert exit_code == 1
 
+    def test_list_stub(self, capsys: pytest.CaptureFixture[str]) -> None:
+        exit_code = main(["list"])
+        output = capsys.readouterr().out
+        assert exit_code == 0
+        assert "stub" in output.lower()
+        assert "Monitored repositories" in output
+
     def test_stats_stub(self, capsys: pytest.CaptureFixture[str]) -> None:
         exit_code = main(["stats"])
         assert exit_code == 0

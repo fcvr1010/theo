@@ -1,10 +1,11 @@
 """
-Embed text using nomic-embed-text-v1.5 for semantic search.
+Embed text for semantic search.
 
     embed_text(texts, prefix="search_document") -> list[list[float]]
     embed_query(query) -> list[float]
 
-Uses fastembed with nomic-embed-text-v1.5 (768-dim vectors).
+Uses fastembed with the model specified in TheoConfig.embedding_model
+(default: nomic-embed-text-v1.5, 768-dim vectors).
 prefix: "search_document" for indexing, "search_query" for querying.
 The nomic model requires explicit prefix strings prepended to the text.
 """
@@ -16,11 +17,13 @@ import threading
 from fastembed import TextEmbedding
 
 from theo import get_logger
+from theo.config import TheoConfig
 
 _log = get_logger("embed_text")
 
-# Canonical model name.
-MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
+# Canonical model name -- sourced from TheoConfig so it can be overridden
+# via the THEO_EMBEDDING_MODEL environment variable.
+MODEL_NAME: str = TheoConfig().embedding_model
 
 # Singleton: the embedding model is expensive to load (~2 s cold start) and
 # stateless, so we keep a single instance alive for the process lifetime.

@@ -19,6 +19,7 @@ Usage:
   theo --help             Show this help
   theo add <path>         Add a repository to watch (stub)
   theo remove <path>      Remove a watched repository (stub)
+  theo list               List monitored repositories and indexing status (stub)
   theo stats [path]       Show indexing statistics (stub)
   theo daemon start       Start the background daemon (stub)
   theo daemon stop        Stop the background daemon (stub)
@@ -52,6 +53,11 @@ def main(argv: list[str] | None = None) -> int:
             print("Error: 'remove' requires a path argument.", file=sys.stderr)
             return 1
         print(f"[stub] Would remove repository: {args[1]}")
+        return 0
+
+    if cmd == "list":
+        print("[stub] Monitored repositories:")
+        print("  <path>  db: <db_path>  coverage: <N>%  last indexed: <timestamp>")
         return 0
 
     if cmd == "stats":

@@ -1,12 +1,22 @@
-"""Shared schema constants for the code-intelligence graph."""
+"""Structural schema definitions for the code-intelligence graph.
+
+This module defines the graph type system: node tables, primary keys,
+allowed relationship types, field validation, and vector index specs.
+These are structural constants that are not user-configurable.
+
+Configurable settings (embedding model name, embedding dimension, paths)
+live in ``theo.config.TheoConfig``.
+"""
 
 from __future__ import annotations
 
 import re
 
-# Embedding vector dimension (nomic-embed-text-v1.5 produces 768-dim vectors).
-# Used in DDL (init_db) and query construction (brute-force cosine similarity).
-EMBEDDING_DIM: int = 768
+from theo.config import TheoConfig
+
+# Embedding vector dimension -- sourced from TheoConfig so it can be
+# overridden via the THEO_EMBEDDING_DIM environment variable.
+EMBEDDING_DIM: int = TheoConfig().embedding_dim
 
 TABLES: tuple[str, ...] = ("Concept", "SourceFile")
 
