@@ -28,7 +28,8 @@ def init_db(db_path: str) -> dict[str, Any]:
             kind STRING,
             description STRING,
             notes STRING,
-            git_revision STRING
+            git_revision STRING,
+            embedding FLOAT[768]
         )""",
         """CREATE NODE TABLE IF NOT EXISTS SourceFile(
             path STRING PRIMARY KEY,
@@ -37,7 +38,8 @@ def init_db(db_path: str) -> dict[str, Any]:
             description STRING,
             notes STRING,
             line_count INT32,
-            git_revision STRING
+            git_revision STRING,
+            embedding FLOAT[768]
         )""",
         """CREATE NODE TABLE IF NOT EXISTS Symbol(
             id STRING PRIMARY KEY,
@@ -46,7 +48,8 @@ def init_db(db_path: str) -> dict[str, Any]:
             file_path STRING,
             description STRING,
             notes STRING,
-            git_revision STRING
+            git_revision STRING,
+            embedding FLOAT[768]
         )""",
         # Relationship tables
         "CREATE REL TABLE IF NOT EXISTS PartOf(FROM Concept TO Concept, description STRING)",
@@ -69,26 +72,6 @@ def init_db(db_path: str) -> dict[str, Any]:
                 name = parts[0].strip().split()[-1]
                 tables.append(name)
                 break
-
-    # Migrate: add embedding column to node tables (idempotent).
-    for table in ("Concept", "SourceFile", "Symbol"):
-        try:
-            conn.execute(f"ALTER TABLE {table} ADD embedding FLOAT[768]")
-        except RuntimeError as e:
-            if "already has property" in str(e):
-                pass  # Column exists -- migration already applied.
-            else:
-                raise
-
-    # Migrate: add git_revision column to node tables (idempotent).
-    for table in ("Concept", "SourceFile", "Symbol"):
-        try:
-            conn.execute(f"ALTER TABLE {table} ADD git_revision STRING")
-        except RuntimeError as e:
-            if "already has property" in str(e):
-                pass  # Column exists -- migration already applied.
-            else:
-                raise
 
     return {"status": "ok", "tables": tables}
 

@@ -14,19 +14,9 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
+from theo.graph._schema import ALLOWED_REL_TYPES, ALLOWED_TABLES, PK_MAP
 
 _log = get_logger("upsert_rel")
-
-_ALLOWED_TABLES = {"Concept", "SourceFile", "Symbol"}
-_ALLOWED_REL_TYPES = {
-    "PartOf",
-    "BelongsTo",
-    "DefinedIn",
-    "InteractsWith",
-    "DependsOn",
-    "Imports",
-}
-_PK_MAP = {"Concept": "id", "SourceFile": "path", "Symbol": "id"}
 _FIELD_RE = re.compile(r"^[a-z_][a-z0-9_]*$", re.IGNORECASE)
 
 
@@ -39,11 +29,11 @@ def upsert_rel(
     to_id: str,
     properties: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if rel_type not in _ALLOWED_REL_TYPES:
+    if rel_type not in ALLOWED_REL_TYPES:
         raise ValueError(f"Invalid rel_type: {rel_type!r}")
-    if from_table not in _ALLOWED_TABLES:
+    if from_table not in ALLOWED_TABLES:
         raise ValueError(f"Invalid from_table: {from_table!r}")
-    if to_table not in _ALLOWED_TABLES:
+    if to_table not in ALLOWED_TABLES:
         raise ValueError(f"Invalid to_table: {to_table!r}")
     if properties:
         for k in properties:
@@ -55,8 +45,8 @@ def upsert_rel(
     db = lb.Database(db_path)
     conn = lb.Connection(db)
 
-    from_pk = _PK_MAP[from_table]
-    to_pk = _PK_MAP[to_table]
+    from_pk = PK_MAP[from_table]
+    to_pk = PK_MAP[to_table]
 
     params: dict[str, Any] = {"from_id": from_id, "to_id": to_id}
 

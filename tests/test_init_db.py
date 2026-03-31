@@ -107,34 +107,6 @@ class TestInitDb:
         result = conn.execute("MATCH (c:Concept {id: 'emb_test'}) RETURN c.embedding")
         assert result.has_next()
 
-    def test_migration_adds_git_revision_to_existing_db(self, tmp_path: Path) -> None:
-        """Simulate a DB created without git_revision, then run init_db to migrate."""
-        db_path = str(tmp_path / "test.db")
-        db = lb.Database(db_path)
-        conn = lb.Connection(db)
-        # Create tables without git_revision.
-        conn.execute(
-            "CREATE NODE TABLE IF NOT EXISTS Concept("
-            "id STRING PRIMARY KEY, name STRING, description STRING)"
-        )
-        del conn
-        db.close()
-
-        # Running init_db should add the git_revision column via migration.
-        result = init_db(db_path)
-        assert result["status"] == "ok"
-
-        # Verify the column was added.
-        db = lb.Database(db_path)
-        conn = lb.Connection(db)
-        conn.execute(
-            "CREATE (c:Concept {id: 'migrated', name: 'Migrated', "
-            "description: 'test', git_revision: 'v2'})"
-        )
-        r = conn.execute("MATCH (c:Concept {id: 'migrated'}) RETURN c.git_revision")
-        assert r.has_next()
-        assert r.get_next()[0] == "v2"
-
     def test_relationship_tables_created(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "test.db")
         init_db(db_path)

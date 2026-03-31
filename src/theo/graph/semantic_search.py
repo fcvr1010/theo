@@ -25,12 +25,10 @@ import real_ladybug as lb
 
 from theo import get_logger
 from theo.graph._ext import execute, load_vector_ext
+from theo.graph._schema import PK_MAP, TABLES
 from theo.graph.embed_text import EMBEDDING_DIM, embed_query
 
 _log = get_logger("semantic_search")
-
-_TABLES = ("Concept", "SourceFile", "Symbol")
-_PK_MAP = {"Concept": "id", "SourceFile": "path", "Symbol": "id"}
 
 # HNSW index names (must match manage_indexes.py convention).
 _INDEX_MAP = {
@@ -58,7 +56,7 @@ def _hnsw_search(
 ) -> list[dict[str, Any]] | None:
     """Try HNSW search on a single table.  Returns None if no index exists."""
     idx_name = _INDEX_MAP[table]
-    pk_field = _PK_MAP[table]
+    pk_field = PK_MAP[table]
     try:
         result = execute(
             conn,
@@ -75,7 +73,7 @@ def _hnsw_search(
     cols: list[str] = result.get_column_names()
     matches: list[dict[str, Any]] = []
     while result.has_next():
-        row = dict(zip(cols, result.get_next(), strict=False))
+        row = dict(zip(cols, result.get_next(), strict=True))
         matches.append(
             {
                 "table": table,
@@ -96,7 +94,7 @@ def _brute_force_search(
     top_k: int,
 ) -> list[dict[str, Any]]:
     """Brute-force cosine similarity search on a single table."""
-    pk_field = _PK_MAP[table]
+    pk_field = PK_MAP[table]
     result = execute(
         conn,
         f"MATCH (n:{table}) "
@@ -111,7 +109,7 @@ def _brute_force_search(
     cols: list[str] = result.get_column_names()
     matches: list[dict[str, Any]] = []
     while result.has_next():
-        row = dict(zip(cols, result.get_next(), strict=False))
+        row = dict(zip(cols, result.get_next(), strict=True))
         matches.append(
             {
                 "table": table,
@@ -143,7 +141,7 @@ def _collect_rows(result: lb.QueryResult) -> list[dict[str, Any]]:
     cols: list[str] = result.get_column_names()
     rows: list[dict[str, Any]] = []
     while result.has_next():
-        rows.append(dict(zip(cols, result.get_next(), strict=False)))
+        rows.append(dict(zip(cols, result.get_next(), strict=True)))
     return rows
 
 
@@ -269,8 +267,8 @@ def semantic_search(
     Returns:
         Dict with "matches" (always) and "related_*" keys (when expand=True).
     """
-    if table and table not in _TABLES:
-        raise ValueError(f"Invalid table: {table!r}. Must be one of {_TABLES}")
+    if table and table not in TABLES:
+        raise ValueError(f"Invalid table: {table!r}. Must be one of {TABLES}")
 
     _log.info(
         '[READ] Semantic search: query="%s" table=%s top_k=%d expand=%s',
@@ -286,7 +284,7 @@ def semantic_search(
 
     query_vec = embed_query(query)
 
-    tables = [table] if table else list(_TABLES)
+    tables = [table] if table else list(TABLES)
     all_matches: list[dict[str, Any]] = []
     for tbl in tables:
         all_matches.extend(_search_table(conn, tbl, query_vec, top_k))

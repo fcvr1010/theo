@@ -47,7 +47,8 @@ def get_logger(name: str) -> logging.Logger:
                 )
                 # Attach to the parent "theo" logger so all children inherit it.
                 parent = logging.getLogger("theo")
-                parent.setLevel(logging.DEBUG)
+                level_name = os.environ.get("THEO_LOG_LEVEL", "INFO").upper()
+                parent.setLevel(getattr(logging, level_name, logging.INFO))
                 parent.propagate = False
                 parent.addHandler(handler)
                 _handler_installed = True

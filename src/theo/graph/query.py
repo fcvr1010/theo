@@ -32,7 +32,7 @@ def query(db_path: str, cypher: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     while result.has_next():
         row = result.get_next()
-        rows.append(dict(zip(columns, row, strict=False)))
+        rows.append(dict(zip(columns, row, strict=True)))
     return rows
 
 

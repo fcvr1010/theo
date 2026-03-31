@@ -17,16 +17,14 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
+from theo.graph._schema import ALLOWED_TABLES, PK_MAP
 
 _log = get_logger("upsert_node")
-
-_ALLOWED_TABLES = {"Concept", "SourceFile", "Symbol"}
-_PK_MAP = {"Concept": "id", "SourceFile": "path", "Symbol": "id"}
 _FIELD_RE = re.compile(r"^[a-z_][a-z0-9_]*$", re.IGNORECASE)
 
 
 def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[str, Any]:
-    if table not in _ALLOWED_TABLES:
+    if table not in ALLOWED_TABLES:
         raise ValueError(f"Invalid table: {table!r}")
     for k in properties:
         if not _FIELD_RE.match(k):
@@ -35,7 +33,7 @@ def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[st
     db = lb.Database(db_path)
     conn = lb.Connection(db)
 
-    pk_field = _PK_MAP[table]
+    pk_field = PK_MAP[table]
     pk_value = properties[pk_field]
     _log.info("[WRITE] Upsert node: %s key=%s", table, pk_value)
 
