@@ -11,33 +11,39 @@ The nomic model requires explicit prefix strings prepended to the text.
 
 from __future__ import annotations
 
+import threading
+
 from fastembed import TextEmbedding
 
 from theo import get_logger
 
 _log = get_logger("embed_text")
 
-# Canonical model name and output dimension.
+# Canonical model name.
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
-EMBEDDING_DIM = 768
 
 # Singleton: the embedding model is expensive to load (~2 s cold start) and
 # stateless, so we keep a single instance alive for the process lifetime.
+# Thread-safe via double-checked locking (same pattern as theo.__init__).
 _model: TextEmbedding | None = None
+_model_lock = threading.Lock()
 
 
 def _get_model() -> TextEmbedding:
-    """Lazy-load the embedding model (singleton)."""
+    """Lazy-load the embedding model (thread-safe singleton)."""
     global _model
     if _model is None:
-        _model = TextEmbedding(MODEL_NAME)
+        with _model_lock:
+            if _model is None:
+                _model = TextEmbedding(MODEL_NAME)
     return _model
 
 
 def reset_model() -> None:
     """Release the singleton model instance to free memory."""
     global _model
-    _model = None
+    with _model_lock:
+        _model = None
 
 
 def embed_text(texts: list[str], prefix: str = "search_document") -> list[list[float]]:

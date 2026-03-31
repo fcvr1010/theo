@@ -14,7 +14,7 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._ext import execute
+from theo.graph._ext import collect_rows, execute
 
 _log = get_logger("query")
 
@@ -31,12 +31,9 @@ def query(db_path: str, cypher: str) -> list[dict[str, Any]]:
     _log.info("[READ] Graph query: %s", cypher[:120])
     db = lb.Database(db_path, read_only=True)
     conn = lb.Connection(db)
-    result = execute(conn, cypher)
-    columns: list[str] = result.get_column_names()
-    rows: list[dict[str, Any]] = []
-    while result.has_next():
-        row = result.get_next()
-        rows.append(dict(zip(columns, row, strict=True)))
+    rows = collect_rows(execute(conn, cypher))
+    del conn
+    db.close()
     return rows
 
 

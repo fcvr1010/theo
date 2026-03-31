@@ -23,9 +23,9 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._ext import execute, get_next_list, load_vector_ext
-from theo.graph._schema import INDEX_MAP, PK_MAP, TABLES
-from theo.graph.embed_text import EMBEDDING_DIM, embed_query
+from theo.graph._ext import collect_rows, execute, get_next_list, load_vector_ext
+from theo.graph._schema import EMBEDDING_DIM, INDEX_MAP, PK_MAP, TABLES
+from theo.graph.embed_text import embed_query
 
 _log = get_logger("semantic_search")
 
@@ -128,15 +128,6 @@ def _search_table(
     return _brute_force_search(conn, table, query_vec, top_k)
 
 
-def _collect_rows(result: lb.QueryResult) -> list[dict[str, Any]]:
-    """Drain a KuzuDB query result into a list of dicts."""
-    cols: list[str] = result.get_column_names()
-    rows: list[dict[str, Any]] = []
-    while result.has_next():
-        rows.append(dict(zip(cols, get_next_list(result), strict=True)))
-    return rows
-
-
 def _expand_matches(
     conn: lb.Connection,
     matches: list[dict[str, Any]],
@@ -167,7 +158,7 @@ def _expand_matches(
 
         # DependsOn and InteractsWith (both directions).
         for rel in ("DependsOn", "InteractsWith"):
-            for row in _collect_rows(
+            for row in collect_rows(
                 execute(
                     conn,
                     f"MATCH (a:Concept)-[:{rel}]->(b:Concept) "
@@ -183,7 +174,7 @@ def _expand_matches(
                         "description": row["description"] or "",
                     }
 
-            for row in _collect_rows(
+            for row in collect_rows(
                 execute(
                     conn,
                     f"MATCH (a:Concept)-[:{rel}]->(b:Concept) "
@@ -200,7 +191,7 @@ def _expand_matches(
                     }
 
         # Files belonging to matched concepts (incoming BelongsTo).
-        for row in _collect_rows(
+        for row in collect_rows(
             execute(
                 conn,
                 "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) "
@@ -221,7 +212,7 @@ def _expand_matches(
         path_list = list(matched_file_paths)
 
         # Concepts that matched files belong to (outgoing BelongsTo).
-        for row in _collect_rows(
+        for row in collect_rows(
             execute(
                 conn,
                 "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) "
@@ -238,7 +229,7 @@ def _expand_matches(
                 }
 
         # Files connected via Imports (both directions).
-        for row in _collect_rows(
+        for row in collect_rows(
             execute(
                 conn,
                 "MATCH (a:SourceFile)-[:Imports]->(b:SourceFile) "
@@ -254,7 +245,7 @@ def _expand_matches(
                     "description": row["description"] or "",
                 }
 
-        for row in _collect_rows(
+        for row in collect_rows(
             execute(
                 conn,
                 "MATCH (a:SourceFile)-[:Imports]->(b:SourceFile) "
@@ -328,6 +319,9 @@ def semantic_search(
     if expand and matches:
         expansion = _expand_matches(conn, matches)
         result.update(expansion)
+
+    del conn
+    db.close()
 
     return result
 

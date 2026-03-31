@@ -72,6 +72,8 @@ def get_coverage(
     while qr.has_next():
         row = get_next_list(qr)
         indexed.add(str(row[0]))
+    del conn
+    db.close()
 
     total = len(on_disk)
     indexed_count = len(indexed & on_disk)

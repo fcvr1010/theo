@@ -46,3 +46,16 @@ def get_next_list(result: lb.QueryResult) -> list[Any]:
     if isinstance(row, dict):
         return list(row.values())
     return row
+
+
+def collect_rows(result: lb.QueryResult) -> list[dict[str, Any]]:
+    """Drain a KuzuDB query result into a list of dicts.
+
+    Common pattern used by query, semantic_search, and backfill_embeddings.
+    Each row is a dict mapping column names to values.
+    """
+    cols: list[str] = result.get_column_names()
+    rows: list[dict[str, Any]] = []
+    while result.has_next():
+        rows.append(dict(zip(cols, get_next_list(result), strict=True)))
+    return rows

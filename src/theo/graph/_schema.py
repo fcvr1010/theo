@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import re
 
+# Embedding vector dimension (nomic-embed-text-v1.5 produces 768-dim vectors).
+# Used in DDL (init_db) and query construction (brute-force cosine similarity).
+EMBEDDING_DIM: int = 768
+
 TABLES: tuple[str, ...] = ("Concept", "SourceFile")
 
 PK_MAP: dict[str, str] = {"Concept": "id", "SourceFile": "path"}

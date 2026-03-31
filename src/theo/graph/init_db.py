@@ -16,7 +16,7 @@ from typing import Any
 
 import real_ladybug as lb
 
-from theo.graph._schema import ALLOWED_REL_TYPES, TABLES
+from theo.graph._schema import ALLOWED_REL_TYPES, EMBEDDING_DIM, TABLES
 
 
 def init_db(db_path: str) -> dict[str, Any]:
@@ -24,9 +24,11 @@ def init_db(db_path: str) -> dict[str, Any]:
     db = lb.Database(db_path)
     conn = lb.Connection(db)
 
+    dim = EMBEDDING_DIM
+
     stmts = [
         # Node tables
-        """CREATE NODE TABLE IF NOT EXISTS Concept(
+        f"""CREATE NODE TABLE IF NOT EXISTS Concept(
             id STRING PRIMARY KEY,
             name STRING,
             level INT32,
@@ -34,9 +36,9 @@ def init_db(db_path: str) -> dict[str, Any]:
             description STRING,
             notes STRING,
             git_revision STRING,
-            embedding FLOAT[768]
+            embedding FLOAT[{dim}]
         )""",
-        """CREATE NODE TABLE IF NOT EXISTS SourceFile(
+        f"""CREATE NODE TABLE IF NOT EXISTS SourceFile(
             path STRING PRIMARY KEY,
             name STRING,
             language STRING,
@@ -44,7 +46,7 @@ def init_db(db_path: str) -> dict[str, Any]:
             notes STRING,
             line_count INT32,
             git_revision STRING,
-            embedding FLOAT[768]
+            embedding FLOAT[{dim}]
         )""",
         # Relationship tables
         "CREATE REL TABLE IF NOT EXISTS PartOf(FROM Concept TO Concept, description STRING)",

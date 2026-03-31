@@ -17,15 +17,19 @@ import real_ladybug as lb
 
 from theo import get_logger
 from theo.graph._ext import execute, get_next_list
+from theo.graph._schema import PK_MAP, TABLES
 from theo.graph.embed_text import embed_text
 from theo.graph.manage_indexes import create_vector_indexes, drop_vector_indexes
 
 _log = get_logger("backfill_embeddings")
 
-# Table -> (primary key field, text fields to concatenate for embedding)
+# Text fields to concatenate for each node's embedding input.
+_TEXT_FIELDS: list[str] = ["description", "notes"]
+
+# Table -> (primary key field, text fields).  PK is derived from _schema.PK_MAP
+# to maintain a single source of truth for primary key field names.
 _TABLE_SPECS: dict[str, tuple[str, list[str]]] = {
-    "Concept": ("id", ["description", "notes"]),
-    "SourceFile": ("path", ["description", "notes"]),
+    table: (PK_MAP[table], _TEXT_FIELDS) for table in TABLES
 }
 
 

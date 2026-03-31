@@ -82,8 +82,9 @@ def begin_write(db_path: str) -> str:
     # If main DB does not exist yet (first run), the caller will run init_db
     # on the returned cow_path to create a fresh database.
 
-    _log.info("[WRITE] Begin COW session: %s", cow_path)
-    return str(cow_path)
+    resolved = cow_path.resolve()
+    _log.info("[WRITE] Begin COW session: %s", resolved)
+    return str(resolved)
 
 
 if __name__ == "__main__":
