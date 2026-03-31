@@ -12,36 +12,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install dependencies
-        run: pip install pre-commit
       - name: Run pre-commit
-        run: pre-commit run --all-files
+        run: uvx pre-commit run --all-files
 
   type-check:
     name: Type check (mypy)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
       - name: Install package with dev extras
-        run: pip install -e ".[dev]"
+        run: uv sync --extra dev
       - name: Run mypy
-        run: mypy src/theo
+        run: uv run mypy src/theo
 
   test:
     name: Test (pytest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v5
       - name: Install package with dev extras
-        run: pip install -e ".[dev]"
+        run: uv sync --extra dev
       - name: Run tests
-        run: pytest tests/ -v -m "not integration"
+        run: uv run pytest tests/ -v -m "not integration"
