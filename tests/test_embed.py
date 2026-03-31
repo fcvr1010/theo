@@ -10,7 +10,8 @@ class TestEmbedText:
     """Integration tests for embedding generation."""
 
     def test_embed_single_text(self) -> None:
-        from theo.graph.embed_text import EMBEDDING_DIM, embed_text
+        from theo.graph._schema import EMBEDDING_DIM
+        from theo.graph.embed_text import embed_text
 
         result = embed_text(["hello world"])
         assert len(result) == 1
@@ -29,7 +30,8 @@ class TestEmbedText:
         assert result == []
 
     def test_embed_query(self) -> None:
-        from theo.graph.embed_text import EMBEDDING_DIM, embed_query
+        from theo.graph._schema import EMBEDDING_DIM
+        from theo.graph.embed_text import embed_query
 
         result = embed_query("what is dispatch?")
         assert len(result) == EMBEDDING_DIM

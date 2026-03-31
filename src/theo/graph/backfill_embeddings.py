@@ -16,7 +16,7 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._ext import execute, get_next_list
+from theo.graph._ext import collect_rows, execute, get_next_list
 from theo.graph._schema import PK_MAP, TABLES
 from theo.graph.embed_text import embed_text
 from theo.graph.manage_indexes import create_vector_indexes, drop_vector_indexes
@@ -60,13 +60,8 @@ def backfill_embeddings(db_path: str, force: bool = False) -> dict[str, Any]:
         field_list = ", ".join(f"n.{f} AS {f}" for f in text_fields)
         null_filter = "" if force else "WHERE n.embedding IS NULL "
         cypher = f"MATCH (n:{table}) {null_filter}RETURN n.{pk_field} AS pk, {field_list}"
-        result = execute(conn, cypher)
-        cols: list[str] = result.get_column_names()
-
         # Collect rows in memory (needed for batch embedding).
-        rows: list[dict[str, Any]] = []
-        while result.has_next():
-            rows.append(dict(zip(cols, get_next_list(result), strict=True)))
+        rows = collect_rows(execute(conn, cypher))
 
         to_embed += len(rows)
 
