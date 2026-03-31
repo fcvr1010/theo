@@ -5,23 +5,24 @@ All functions here are read-only. They never modify the graph.
 
 Usage::
 
-    from theo.client import query, semantic_search, get_coverage
+    from theo.client import query, semantic_search
 """
 
-from theo.client.get_coverage import get_coverage
+from typing import Any
+
 from theo.client.query import query
 
 __all__ = [
-    "get_coverage",
     "query",
     "semantic_search",
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """Lazy-import semantic_search to avoid loading fastembed at import time."""
     if name == "semantic_search":
         from theo.client.semantic_search import semantic_search
 
+        globals()["semantic_search"] = semantic_search
         return semantic_search
     raise AttributeError(f"module 'theo.client' has no attribute {name!r}")

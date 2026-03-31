@@ -16,7 +16,7 @@ from typing import Any
 
 import real_ladybug as lb
 
-from theo._shared._schema import ALLOWED_REL_TYPES, EMBEDDING_DIM, TABLES
+from theo._schema import ALLOWED_REL_TYPES, EMBEDDING_DIM, TABLES
 
 
 def init_db(db_path: str) -> dict[str, Any]:

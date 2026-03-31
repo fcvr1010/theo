@@ -1,10 +1,11 @@
-"""Tests for theo.client.get_coverage."""
+"""Tests for theo.tools.get_coverage."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
-from theo.client.get_coverage import get_coverage
+from theo.tools.get_coverage import get_coverage
 from theo.tools.init_db import init_db
 from theo.tools.upsert_node import upsert_node
 
@@ -161,3 +162,95 @@ class TestGetCoverage:
             extensions={".py"},
         )
         assert result["total"] == 0
+
+    def test_stale_key_present_in_result(self, tmp_path: Path) -> None:
+        db_path = str(tmp_path / "test.db")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        init_db(db_path)
+
+        result = get_coverage(db_path, str(repo))
+        assert "stale" in result
+        assert result["stale"] == []
+
+    def test_stale_files_detected(self, tmp_path: Path) -> None:
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+
+        repo = tmp_path / "repo"
+        src = repo / "lib"
+        src.mkdir(parents=True)
+        (src / "a.py").write_text("# a")
+        (src / "b.py").write_text("# b")
+
+        # Index both files with an old revision.
+        upsert_node(
+            db_path,
+            "SourceFile",
+            {"path": "lib/a.py", "name": "a.py", "git_revision": "old_rev"},
+        )
+        upsert_node(
+            db_path,
+            "SourceFile",
+            {"path": "lib/b.py", "name": "b.py", "git_revision": "current_head"},
+        )
+
+        with patch("theo.tools.get_coverage._get_git_head", return_value="current_head"):
+            result = get_coverage(
+                db_path,
+                str(repo),
+                source_dirs=["lib"],
+                extensions={".py"},
+            )
+
+        assert result["stale"] == ["lib/a.py"]
+        assert result["indexed"] == 2
+        assert result["unindexed"] == []
+
+    def test_stale_empty_when_no_git(self, tmp_path: Path) -> None:
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+
+        repo = tmp_path / "repo"
+        src = repo / "pkg"
+        src.mkdir(parents=True)
+        (src / "mod.py").write_text("# mod")
+
+        upsert_node(
+            db_path,
+            "SourceFile",
+            {"path": "pkg/mod.py", "name": "mod.py", "git_revision": "old"},
+        )
+
+        with patch("theo.tools.get_coverage._get_git_head", return_value=None):
+            result = get_coverage(
+                db_path,
+                str(repo),
+                source_dirs=["pkg"],
+                extensions={".py"},
+            )
+
+        assert result["stale"] == []
+
+    def test_stale_ignores_null_revision(self, tmp_path: Path) -> None:
+        db_path = str(tmp_path / "test.db")
+        init_db(db_path)
+
+        repo = tmp_path / "repo"
+        src = repo / "pkg"
+        src.mkdir(parents=True)
+        (src / "mod.py").write_text("# mod")
+
+        # Index without git_revision (None).
+        upsert_node(db_path, "SourceFile", {"path": "pkg/mod.py", "name": "mod.py"})
+
+        with patch("theo.tools.get_coverage._get_git_head", return_value="abc123"):
+            result = get_coverage(
+                db_path,
+                str(repo),
+                source_dirs=["pkg"],
+                extensions={".py"},
+            )
+
+        # Null revision should not be considered stale.
+        assert result["stale"] == []

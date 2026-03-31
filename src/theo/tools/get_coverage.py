@@ -6,7 +6,8 @@ Compare indexed SourceFile nodes against actual source files on disk.
 source_dirs: directories to scan (default: auto-discover from git or scan repo root).
 extensions: file extensions to include (default: .py, .js, .ts, .rs, .go, .java, .md).
 
-Returns: {total: int, indexed: int, coverage_pct: float, unindexed: list[str]}
+Returns: {total, indexed, coverage_pct, unindexed: list[str], stale: list[str]}
+  stale: indexed files whose git_revision differs from the repo's current HEAD.
 """
 
 from __future__ import annotations
@@ -17,10 +18,24 @@ from typing import Any
 
 import real_ladybug as lb
 
-from theo._shared._ext import execute, get_next_list
+from theo._ext import collect_rows, execute
 
 _DEFAULT_EXTENSIONS = {".py", ".js", ".ts", ".rs", ".go", ".java", ".md"}
 _SKIP_DIRS = {"__pycache__", ".git", "node_modules", ".venv", "venv", ".tox"}
+
+
+def _get_git_head(repo_root: Path) -> str | None:
+    """Return the current HEAD commit hash, or None if not a git repo."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
 
 def _discover_source_dirs(repo_root: Path) -> list[str]:
@@ -64,16 +79,30 @@ def get_coverage(
                 if not any(skip in rel.split("/") for skip in _SKIP_DIRS):
                     on_disk.add(rel)
 
-    # Query indexed files from the graph.
+    # Query indexed files (with git_revision for staleness detection).
     db = lb.Database(db_path, read_only=True)
     conn = lb.Connection(db)
-    qr = execute(conn, "MATCH (f:SourceFile) RETURN f.path")
-    indexed: set[str] = set()
-    while qr.has_next():
-        row = get_next_list(qr)
-        indexed.add(str(row[0]))
+    rows = collect_rows(
+        execute(conn, "MATCH (f:SourceFile) RETURN f.path AS path, f.git_revision AS rev")
+    )
     del conn
     db.close()
+
+    indexed: set[str] = set()
+    revision_by_path: dict[str, str | None] = {}
+    for row in rows:
+        path_str = str(row["path"])
+        indexed.add(path_str)
+        revision_by_path[path_str] = row.get("rev")
+
+    # Staleness: indexed files whose git_revision differs from HEAD.
+    head = _get_git_head(root)
+    stale: list[str] = []
+    if head is not None:
+        for path_str in sorted(indexed & on_disk):
+            rev = revision_by_path.get(path_str)
+            if rev is not None and rev != head:
+                stale.append(path_str)
 
     total = len(on_disk)
     indexed_count = len(indexed & on_disk)
@@ -85,6 +114,7 @@ def get_coverage(
         "indexed": indexed_count,
         "coverage_pct": pct,
         "unindexed": unindexed,
+        "stale": stale,
     }
 
 

@@ -85,7 +85,7 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
-        print("Usage: embed_text.py <text> [prefix]", file=sys.stderr)
+        print("Usage: python -m theo._embed <text> [prefix]", file=sys.stderr)
         sys.exit(1)
 
     text = sys.argv[1]

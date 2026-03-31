@@ -16,9 +16,9 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo._shared._ext import collect_rows, execute, get_next_list
-from theo._shared._schema import PK_MAP, TABLES
-from theo._shared.embed import embed_text
+from theo._embed import embed_text
+from theo._ext import collect_rows, execute, get_next_list
+from theo._schema import PK_MAP, TABLES
 from theo.tools.manage_indexes import create_vector_indexes, drop_vector_indexes
 
 _log = get_logger("backfill_embeddings")

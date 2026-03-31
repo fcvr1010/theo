@@ -14,7 +14,7 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo._shared._ext import collect_rows, execute
+from theo._ext import collect_rows, execute
 
 _log = get_logger("query")
 

@@ -23,9 +23,9 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo._shared._ext import collect_rows, execute, get_next_list, load_vector_ext
-from theo._shared._schema import EMBEDDING_DIM, INDEX_MAP, PK_MAP, TABLES
-from theo._shared.embed import embed_query
+from theo._embed import embed_query
+from theo._ext import collect_rows, execute, get_next_list, load_vector_ext
+from theo._schema import EMBEDDING_DIM, INDEX_MAP, PK_MAP, TABLES
 
 _log = get_logger("semantic_search")
 

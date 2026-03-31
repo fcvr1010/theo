@@ -18,7 +18,7 @@ class TestSemanticSearch:
     def test_search_returns_matches(self, populated_db: str) -> None:
         import real_ladybug as lb
 
-        from theo._shared.embed import embed_text
+        from theo._embed import embed_text
         from theo.client.semantic_search import semantic_search
 
         # Add embeddings to nodes first.
@@ -56,7 +56,7 @@ class TestSemanticSearch:
     def test_search_with_table_filter(self, populated_db: str) -> None:
         import real_ladybug as lb
 
-        from theo._shared.embed import embed_text
+        from theo._embed import embed_text
         from theo.client.semantic_search import semantic_search
 
         db = lb.Database(populated_db)
