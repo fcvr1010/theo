@@ -26,7 +26,6 @@ _log = get_logger("backfill_embeddings")
 _TABLE_SPECS: dict[str, tuple[str, list[str]]] = {
     "Concept": ("id", ["description", "notes"]),
     "SourceFile": ("path", ["description", "notes"]),
-    "Symbol": ("id", ["description", "notes"]),
 }
 
 

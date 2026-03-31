@@ -24,7 +24,6 @@ _log = get_logger("manage_indexes")
 _INDEX_SPECS: list[tuple[str, str]] = [
     ("Concept", "concept_emb_idx"),
     ("SourceFile", "sourcefile_emb_idx"),
-    ("Symbol", "symbol_emb_idx"),
 ]
 
 

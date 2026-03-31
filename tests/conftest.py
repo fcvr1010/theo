@@ -54,14 +54,6 @@ def populated_db(fresh_db: str) -> str:
         "notes: 'Output handling', line_count: 150, git_revision: 'abc123'})"
     )
 
-    # Insert sample Symbols.
-    conn.execute(
-        "CREATE (s:Symbol {id: 'dispatch.classify', name: 'classify', "
-        "kind: 'function', file_path: 'src/dispatch.py', "
-        "description: 'Classify incoming messages', notes: 'Entry point', "
-        "git_revision: 'abc123'})"
-    )
-
     # Insert relationships.
     conn.execute(
         "MATCH (a:Concept {id: 'dispatch'}), (b:Concept {id: 'delivery'}) "
@@ -70,10 +62,6 @@ def populated_db(fresh_db: str) -> str:
     conn.execute(
         "MATCH (f:SourceFile {path: 'src/dispatch.py'}), (c:Concept {id: 'dispatch'}) "
         "CREATE (f)-[:BelongsTo {description: 'main file'}]->(c)"
-    )
-    conn.execute(
-        "MATCH (s:Symbol {id: 'dispatch.classify'}), (f:SourceFile {path: 'src/dispatch.py'}) "
-        "CREATE (s)-[:DefinedIn]->(f)"
     )
     conn.execute(
         "MATCH (a:SourceFile {path: 'src/dispatch.py'}), (b:SourceFile {path: 'src/delivery.py'}) "

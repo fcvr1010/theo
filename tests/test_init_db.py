@@ -30,10 +30,8 @@ class TestInitDb:
         expected_tables = {
             "Concept",
             "SourceFile",
-            "Symbol",
             "PartOf",
             "BelongsTo",
-            "DefinedIn",
             "InteractsWith",
             "DependsOn",
             "Imports",
@@ -81,20 +79,6 @@ class TestInitDb:
         result = conn.execute("MATCH (f:SourceFile {path: 'test.py'}) RETURN f.git_revision")
         assert result.has_next()
         assert result.get_next()[0] == "abc"
-
-    def test_symbol_table_has_git_revision(self, tmp_path: Path) -> None:
-        db_path = str(tmp_path / "test.db")
-        init_db(db_path)
-        db = lb.Database(db_path)
-        conn = lb.Connection(db)
-        conn.execute(
-            "CREATE (s:Symbol {id: 'sym1', name: 'my_func', kind: 'function', "
-            "file_path: 'test.py', description: 'A function', notes: 'notes', "
-            "git_revision: 'def456'})"
-        )
-        result = conn.execute("MATCH (s:Symbol {id: 'sym1'}) RETURN s.git_revision")
-        assert result.has_next()
-        assert result.get_next()[0] == "def456"
 
     def test_embedding_column_exists(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "test.db")

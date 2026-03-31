@@ -3,7 +3,7 @@ MERGE (upsert) a node in the code-intelligence graph.
 
     upsert_node(db_path, table, properties) -> dict
 
-table: "Concept" | "SourceFile" | "Symbol"
+table: "Concept" | "SourceFile"
 properties: dict with the primary key and any fields to set.
 
 Returns: {status: "ok", table, key}

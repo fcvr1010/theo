@@ -1,12 +1,12 @@
-"""Tests for theo.graph.get_coverage."""
+"""Tests for theo.graph.tool.get_coverage."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from theo.graph.get_coverage import get_coverage
 from theo.graph.init_db import init_db
-from theo.graph.upsert_node import upsert_node
+from theo.graph.tool.get_coverage import get_coverage
+from theo.graph.tool.upsert_node import upsert_node
 
 
 class TestGetCoverage:

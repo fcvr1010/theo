@@ -4,7 +4,7 @@ Semantic search over the code-intelligence graph.
     semantic_search(db_path, query, table=None, top_k=10, expand=False) -> dict
 
 query: Natural language question (e.g., "how are messages delivered?")
-table: Optional filter -- "Concept", "SourceFile", "Symbol", or None for all.
+table: Optional filter -- "Concept", "SourceFile", or None for all.
 top_k: Number of results to return.
 expand: If True, follow graph edges from matched nodes to get neighbourhood context.
 
@@ -12,8 +12,7 @@ Returns:
   {
     "matches": [...],              # Top-K semantic matches with scores
     "related_concepts": [...],     # (only if expand=True)
-    "related_files": [...],        # (only if expand=True)
-    "related_symbols": [...]       # (only if expand=True)
+    "related_files": [...]         # (only if expand=True)
   }
 """
 
@@ -34,7 +33,6 @@ _log = get_logger("semantic_search")
 _INDEX_MAP = {
     "Concept": "concept_emb_idx",
     "SourceFile": "sourcefile_emb_idx",
-    "Symbol": "symbol_emb_idx",
 }
 
 _MAX_NOTES_LEN = 200
@@ -152,7 +150,7 @@ def _expand_matches(
     """Follow graph edges from matched nodes to build neighbourhood context.
 
     Uses batched queries (WHERE id IN $ids) instead of per-node loops to
-    reduce the number of round-trips from O(5*N) to O(5).
+    reduce the number of round-trips from O(3*N) to O(3).
     """
     matched_concept_ids: set[str] = set()
     matched_file_paths: set[str] = set()
@@ -165,7 +163,6 @@ def _expand_matches(
 
     related_concepts: dict[str, dict[str, Any]] = {}
     related_files: dict[str, dict[str, Any]] = {}
-    related_symbols: dict[str, dict[str, Any]] = {}
 
     if matched_concept_ids:
         id_list = list(matched_concept_ids)
@@ -223,28 +220,9 @@ def _expand_matches(
                     "description": row["description"] or "",
                 }
 
-    # Symbols defined in matched or related files (batched DefinedIn).
-    all_file_paths = list(matched_file_paths | set(related_files.keys()))
-    if all_file_paths:
-        for row in _collect_rows(
-            execute(
-                conn,
-                "MATCH (s:Symbol)-[:DefinedIn]->(f:SourceFile) "
-                "WHERE f.path IN $paths "
-                "RETURN s.id AS id, s.name AS name, s.description AS description",
-                {"paths": all_file_paths},
-            )
-        ):
-            related_symbols[row["id"]] = {
-                "id": row["id"],
-                "name": row["name"],
-                "description": row["description"] or "",
-            }
-
     return {
         "related_concepts": list(related_concepts.values()),
         "related_files": list(related_files.values()),
-        "related_symbols": list(related_symbols.values()),
     }
 
 
@@ -260,7 +238,7 @@ def semantic_search(
     Args:
         db_path: Path to the KuzuDB database.
         query: Natural language search query.
-        table: Optional table filter ("Concept", "SourceFile", "Symbol").
+        table: Optional table filter ("Concept", "SourceFile").
         top_k: Number of results to return.
         expand: If True, follow graph edges to add neighbourhood context.
 

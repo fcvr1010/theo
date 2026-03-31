@@ -1,10 +1,10 @@
-"""Tests for theo.graph.query."""
+"""Tests for theo.graph.tool.query."""
 
 from __future__ import annotations
 
 import pytest
 
-from theo.graph.query import query
+from theo.graph.tool.query import query
 
 
 class TestQuery:
@@ -46,11 +46,6 @@ class TestQuery:
         rows = query(populated_db, "MATCH (f:SourceFile) RETURN f.path ORDER BY f.path")
         assert len(rows) == 2
 
-    def test_query_symbols(self, populated_db: str) -> None:
-        rows = query(populated_db, "MATCH (s:Symbol) RETURN s.id, s.name")
-        assert len(rows) == 1
-        assert rows[0]["s.name"] == "classify"
-
     def test_query_rejects_create(self, populated_db: str) -> None:
         with pytest.raises(ValueError, match="Only read-only queries"):
             query(populated_db, "CREATE (c:Concept {id: 'evil'})")
@@ -85,11 +80,9 @@ class TestQuery:
     def test_query_across_relationship_chain(self, populated_db: str) -> None:
         rows = query(
             populated_db,
-            "MATCH (s:Symbol)-[:DefinedIn]->(f:SourceFile)-[:BelongsTo]->(c:Concept) "
-            "RETURN s.name, f.path, c.name",
+            "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) RETURN f.path, c.name",
         )
         assert len(rows) == 1
-        assert rows[0]["s.name"] == "classify"
         assert rows[0]["f.path"] == "src/dispatch.py"
         assert rows[0]["c.name"] == "Dispatch"
 

@@ -4,6 +4,9 @@ Initialise a Theo graph database with the code-intelligence schema (idempotent).
     init_db(db_path) -> dict
 
 Returns: {status: "ok", tables: [...]}
+
+Note: this is a simple "run all CREATE IF NOT EXISTS" init.  If the schema
+evolves significantly, a proper migration framework can be introduced later.
 """
 
 from __future__ import annotations
@@ -41,20 +44,9 @@ def init_db(db_path: str) -> dict[str, Any]:
             git_revision STRING,
             embedding FLOAT[768]
         )""",
-        """CREATE NODE TABLE IF NOT EXISTS Symbol(
-            id STRING PRIMARY KEY,
-            name STRING,
-            kind STRING,
-            file_path STRING,
-            description STRING,
-            notes STRING,
-            git_revision STRING,
-            embedding FLOAT[768]
-        )""",
         # Relationship tables
         "CREATE REL TABLE IF NOT EXISTS PartOf(FROM Concept TO Concept, description STRING)",
         "CREATE REL TABLE IF NOT EXISTS BelongsTo(FROM SourceFile TO Concept, description STRING)",
-        "CREATE REL TABLE IF NOT EXISTS DefinedIn(FROM Symbol TO SourceFile)",
         "CREATE REL TABLE IF NOT EXISTS InteractsWith("
         "FROM Concept TO Concept, description STRING)",
         "CREATE REL TABLE IF NOT EXISTS DependsOn(FROM Concept TO Concept, description STRING)",

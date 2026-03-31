@@ -1,12 +1,12 @@
-"""Tests for theo.graph.upsert_node and theo.graph.upsert_rel."""
+"""Tests for theo.graph.tool.upsert_node and theo.graph.tool.upsert_rel."""
 
 from __future__ import annotations
 
 import pytest
 import real_ladybug as lb
 
-from theo.graph.upsert_node import upsert_node
-from theo.graph.upsert_rel import upsert_rel
+from theo.graph.tool.upsert_node import upsert_node
+from theo.graph.tool.upsert_rel import upsert_rel
 
 
 class TestUpsertNode:
@@ -37,15 +37,6 @@ class TestUpsertNode:
         )
         assert result["status"] == "ok"
         assert result["key"] == "src/main.py"
-
-    def test_upsert_symbol(self, fresh_db: str) -> None:
-        result = upsert_node(
-            fresh_db,
-            "Symbol",
-            {"id": "main.run", "name": "run", "kind": "function"},
-        )
-        assert result["status"] == "ok"
-        assert result["key"] == "main.run"
 
     def test_upsert_updates_existing_node(self, fresh_db: str) -> None:
         upsert_node(
@@ -139,20 +130,6 @@ class TestUpsertRel:
             "x.py",
             "Concept",
             "mod",
-        )
-        assert result["status"] == "ok"
-
-    def test_upsert_defined_in(self, fresh_db: str) -> None:
-        upsert_node(fresh_db, "Symbol", {"id": "f.run", "name": "run"})
-        upsert_node(fresh_db, "SourceFile", {"path": "f.py", "name": "f.py"})
-
-        result = upsert_rel(
-            fresh_db,
-            "DefinedIn",
-            "Symbol",
-            "f.run",
-            "SourceFile",
-            "f.py",
         )
         assert result["status"] == "ok"
 
