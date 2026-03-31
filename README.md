@@ -36,7 +36,8 @@ uv sync --extra dev
 ## Quick start
 
 ```python
-from theo.graph import init_db, upsert_node, upsert_rel, query
+from theo.tools import init_db, upsert_node, upsert_rel
+from theo.client import query
 
 # Create and initialise a database
 init_db("my-graph.db")

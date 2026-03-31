@@ -1,12 +1,12 @@
-"""Tests for theo.graph.tool.upsert_node and theo.graph.tool.upsert_rel."""
+"""Tests for theo.tools.upsert_node and theo.tools.upsert_rel."""
 
 from __future__ import annotations
 
 import pytest
 import real_ladybug as lb
 
-from theo.graph.tool.upsert_node import upsert_node
-from theo.graph.tool.upsert_rel import upsert_rel
+from theo.tools.upsert_node import upsert_node
+from theo.tools.upsert_rel import upsert_rel
 
 
 class TestUpsertNode:

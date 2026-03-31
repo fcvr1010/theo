@@ -6,7 +6,7 @@ Backfill embeddings for all existing nodes in the code-intelligence graph.
 Reads all nodes, computes embeddings for those missing them,
 writes embeddings back, and creates HNSW indexes.
 
-Usage: python -m theo.graph.backfill_embeddings <db_path> [--force]
+Usage: python -m theo.tools.backfill_embeddings <db_path> [--force]
 """
 
 from __future__ import annotations
@@ -16,10 +16,10 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._ext import collect_rows, execute, get_next_list
-from theo.graph._schema import PK_MAP, TABLES
-from theo.graph.embed_text import embed_text
-from theo.graph.manage_indexes import create_vector_indexes, drop_vector_indexes
+from theo._shared._ext import collect_rows, execute, get_next_list
+from theo._shared._schema import PK_MAP, TABLES
+from theo._shared.embed import embed_text
+from theo.tools.manage_indexes import create_vector_indexes, drop_vector_indexes
 
 _log = get_logger("backfill_embeddings")
 
@@ -130,7 +130,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print(
-            "Usage: python -m theo.graph.backfill_embeddings <db_path> [--force]",
+            "Usage: python -m theo.tools.backfill_embeddings <db_path> [--force]",
             file=sys.stderr,
         )
         sys.exit(1)

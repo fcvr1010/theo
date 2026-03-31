@@ -1,10 +1,10 @@
-"""Tests for theo.graph.tool.query."""
+"""Tests for theo.client.query."""
 
 from __future__ import annotations
 
 import pytest
 
-from theo.graph.tool.query import query
+from theo.client.query import query
 
 
 class TestQuery:

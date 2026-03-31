@@ -1,4 +1,4 @@
-"""Tests for theo.graph.tool.begin_write and theo.graph.tool.commit_write (COW sessions)."""
+"""Tests for theo.tools.begin_write and theo.tools.commit_write (COW sessions)."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from theo.graph.init_db import init_db
-from theo.graph.tool.begin_write import STALE_THRESHOLD_SECONDS, begin_write
-from theo.graph.tool.commit_write import commit_write
-from theo.graph.tool.upsert_node import upsert_node
+from theo.tools.begin_write import STALE_THRESHOLD_SECONDS, begin_write
+from theo.tools.commit_write import commit_write
+from theo.tools.init_db import init_db
+from theo.tools.upsert_node import upsert_node
 
 
 class TestBeginWrite:

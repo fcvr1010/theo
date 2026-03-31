@@ -16,8 +16,8 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._ext import load_vector_ext
-from theo.graph._schema import INDEX_SPECS
+from theo._shared._ext import load_vector_ext
+from theo._shared._schema import INDEX_SPECS
 
 _log = get_logger("manage_indexes")
 

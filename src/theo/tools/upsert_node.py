@@ -16,7 +16,7 @@ from typing import Any
 import real_ladybug as lb
 
 from theo import get_logger
-from theo.graph._schema import ALLOWED_TABLES, FIELD_RE, PK_MAP
+from theo._shared._schema import ALLOWED_TABLES, FIELD_RE, PK_MAP
 
 _log = get_logger("upsert_node")
 

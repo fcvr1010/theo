@@ -1,4 +1,4 @@
-"""Tests for theo.graph.tool.semantic_search (integration -- requires model download)."""
+"""Tests for theo.client.semantic_search (integration -- requires model download)."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ class TestSemanticSearch:
     """Integration tests for semantic search."""
 
     def test_search_empty_db(self, fresh_db: str) -> None:
-        from theo.graph.tool.semantic_search import semantic_search
+        from theo.client.semantic_search import semantic_search
 
         result = semantic_search(fresh_db, "test query")
         assert result["matches"] == []
@@ -18,8 +18,8 @@ class TestSemanticSearch:
     def test_search_returns_matches(self, populated_db: str) -> None:
         import real_ladybug as lb
 
-        from theo.graph.embed_text import embed_text
-        from theo.graph.tool.semantic_search import semantic_search
+        from theo._shared.embed import embed_text
+        from theo.client.semantic_search import semantic_search
 
         # Add embeddings to nodes first.
         db = lb.Database(populated_db)
@@ -56,8 +56,8 @@ class TestSemanticSearch:
     def test_search_with_table_filter(self, populated_db: str) -> None:
         import real_ladybug as lb
 
-        from theo.graph.embed_text import embed_text
-        from theo.graph.tool.semantic_search import semantic_search
+        from theo._shared.embed import embed_text
+        from theo.client.semantic_search import semantic_search
 
         db = lb.Database(populated_db)
         conn = lb.Connection(db)
@@ -83,7 +83,7 @@ class TestSemanticSearch:
         assert all(m["table"] == "SourceFile" for m in result["matches"])
 
     def test_search_invalid_table_raises(self, fresh_db: str) -> None:
-        from theo.graph.tool.semantic_search import semantic_search
+        from theo.client.semantic_search import semantic_search
 
         with pytest.raises(ValueError, match="Invalid table"):
             semantic_search(fresh_db, "test", table="NonExistent")

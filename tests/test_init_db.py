@@ -1,4 +1,4 @@
-"""Tests for theo.graph.init_db."""
+"""Tests for theo.tools.init_db."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import real_ladybug as lb
 
-from theo.graph.init_db import init_db
+from theo.tools.init_db import init_db
 
 
 class TestInitDb:

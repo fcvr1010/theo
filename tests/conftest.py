@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from theo.graph.init_db import init_db
+from theo.tools.init_db import init_db
 
 
 @pytest.fixture()
