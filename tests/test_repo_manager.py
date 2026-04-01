@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -108,7 +110,7 @@ def bare_repo(tmp_path: Path) -> str:
         check=True,
         capture_output=True,
         env={
-            **__import__("os").environ,
+            **os.environ,
             "GIT_AUTHOR_NAME": "Test",
             "GIT_AUTHOR_EMAIL": "test@test.com",
             "GIT_COMMITTER_NAME": "Test",
@@ -125,12 +127,8 @@ def bare_repo(tmp_path: Path) -> str:
 
 def _add_commit_to_bare(bare_path: str, tmp_path: Path, filename: str, content: str) -> str:
     """Add a new commit to the bare repo and return the new SHA."""
-    import os
-
     work_path = tmp_path / "push-work"
     if work_path.exists():
-        import shutil
-
         shutil.rmtree(work_path)
     subprocess.run(
         ["git", "clone", bare_path, str(work_path)],
@@ -509,5 +507,26 @@ class TestRepoEntry:
         from dataclasses import asdict
 
         data = asdict(entry)
-        restored = RepoEntry(**data)
+        restored = RepoEntry.from_dict(data)
         assert restored == entry
+
+    def test_from_dict_ignores_extra_keys(self) -> None:
+        """from_dict should silently drop keys that are not RepoEntry fields."""
+        data = {
+            "url": "https://github.com/org/repo.git",
+            "slug": "org-repo",
+            "clone_path": "/tmp/repos/org-repo",
+            "db_path": "/tmp/db/org-repo",
+            "frequency_minutes": 30,
+            "last_checked_revision": None,
+            "last_run_at": None,
+            "enabled_lenses": [],
+            "added_at": "2026-01-01T00:00:00+00:00",
+            # Extra keys from a hypothetical future version.
+            "new_future_field": "some-value",
+            "another_unknown": 42,
+        }
+        entry = RepoEntry.from_dict(data)
+        assert entry.slug == "org-repo"
+        assert not hasattr(entry, "new_future_field")
+        assert not hasattr(entry, "another_unknown")

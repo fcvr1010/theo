@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -45,6 +45,16 @@ class RepoEntry:
     last_run_at: str | None
     enabled_lenses: list[str]
     added_at: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RepoEntry:
+        """Create a ``RepoEntry`` from a dict, ignoring unknown keys.
+
+        This is forward-compatible: if the JSON was written by a newer version
+        of Theo that added extra fields, deserialization will not crash.
+        """
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 @dataclass
@@ -246,12 +256,12 @@ class RepoManager:
 
         self._save(remaining)
         _log.info("Removed repository: %s", url_or_slug)
-        return RepoEntry(**removed)
+        return RepoEntry.from_dict(removed)
 
     def list(self) -> list[RepoEntry]:
         """Return all tracked repositories."""
         entries = self._load()
-        return [RepoEntry(**e) for e in entries]
+        return [RepoEntry.from_dict(e) for e in entries]
 
     def get(self, url_or_slug: str) -> RepoEntry:
         """Look up a single repository by URL or slug.
@@ -262,7 +272,7 @@ class RepoManager:
         entries = self._load()
         for entry in entries:
             if entry.get("url") == url_or_slug or entry.get("slug") == url_or_slug:
-                return RepoEntry(**entry)
+                return RepoEntry.from_dict(entry)
         raise RepoNotFoundError(f"Repository not found: {url_or_slug}")
 
     def update(self, slug: str, **fields: Any) -> RepoEntry:
@@ -301,6 +311,39 @@ class RepoManager:
         self._save(entries)
         _log.info("Updated repository %s: %s", slug, list(fields.keys()))
         return self.get(slug)
+
+    # ── Git helpers ────────────────────────────────────────────────────────
+
+    def _open_repo(self, slug: str) -> tuple[RepoEntry, gitpython.Repo]:
+        """Look up a tracked repository and open its local git clone.
+
+        Args:
+            slug: The repository slug.
+
+        Returns:
+            A tuple of (``RepoEntry``, ``gitpython.Repo``).
+
+        Raises:
+            RepoNotFoundError: If the slug is not tracked.
+            GitOperationError: If the clone directory does not exist or is not
+                a valid git repository.
+        """
+        entry = self.get(slug)
+        clone_dir = Path(entry.clone_path)
+
+        if not clone_dir.exists():
+            raise GitOperationError(
+                f"Repository {slug} is not cloned yet (expected at {clone_dir})"
+            )
+
+        try:
+            repo = gitpython.Repo(str(clone_dir))
+        except gitpython.InvalidGitRepositoryError as exc:
+            raise GitOperationError(
+                f"Directory {clone_dir} is not a valid git repository"
+            ) from exc
+
+        return entry, repo
 
     # ── Git operations ────────────────────────────────────────────────────
 
@@ -361,20 +404,7 @@ class RepoManager:
             RepoNotFoundError: If the slug is not tracked.
             GitOperationError: If the git pull fails or the repo is not cloned.
         """
-        entry = self.get(slug)
-        clone_dir = Path(entry.clone_path)
-
-        if not clone_dir.exists():
-            raise GitOperationError(
-                f"Repository {slug} is not cloned yet (expected at {clone_dir})"
-            )
-
-        try:
-            repo = gitpython.Repo(str(clone_dir))
-        except gitpython.InvalidGitRepositoryError as exc:
-            raise GitOperationError(
-                f"Directory {clone_dir} is not a valid git repository"
-            ) from exc
+        _entry, repo = self._open_repo(slug)
 
         sha_before = repo.head.commit.hexsha
 
@@ -415,19 +445,5 @@ class RepoManager:
             RepoNotFoundError: If the slug is not tracked.
             GitOperationError: If the repo is not cloned or is invalid.
         """
-        entry = self.get(slug)
-        clone_dir = Path(entry.clone_path)
-
-        if not clone_dir.exists():
-            raise GitOperationError(
-                f"Repository {slug} is not cloned yet (expected at {clone_dir})"
-            )
-
-        try:
-            repo = gitpython.Repo(str(clone_dir))
-        except gitpython.InvalidGitRepositoryError as exc:
-            raise GitOperationError(
-                f"Directory {clone_dir} is not a valid git repository"
-            ) from exc
-
+        _entry, repo = self._open_repo(slug)
         return str(repo.head.commit.hexsha)
