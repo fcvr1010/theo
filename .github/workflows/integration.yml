@@ -1,0 +1,22 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every Sunday at midnight UTC.
+    - cron: "0 0 * * 0"
+
+jobs:
+  integration:
+    name: Integration tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package with dev extras
+        run: uv sync --extra dev
+      - name: Run integration tests
+        run: uv run pytest tests/ -v -m integration
