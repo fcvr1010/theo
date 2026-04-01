@@ -49,6 +49,7 @@ All tools live in the `src/theo/tools/` package. Invoke them as Python modules:
 | `query` | `python -m theo.tools.query <db_path> '<cypher>'` -- Run a Cypher query (works on COW copies) |
 | `get_coverage` | `python -m theo.tools.get_coverage <db_path> <repo_root>` -- Coverage stats and staleness detection |
 | `manage_indexes` | `python -m theo.tools.manage_indexes <db_path> [create\|drop]` -- Create or drop HNSW vector indexes |
+| `backfill_embeddings` | `python -m theo.tools.backfill_embeddings <db_path> [--force]` -- Compute embeddings for nodes missing them, then rebuild HNSW indexes |
 
 **Embedding via `theo._embed`:**
 
@@ -63,18 +64,7 @@ The function accepts a list of strings and returns embeddings in the same order.
 
 **Ad-hoc read queries during COW sessions:**
 
-For validation queries against the COW copy (checking existing nodes, verifying structure), use `python -m theo.tools.query <cow_path> '<cypher>'` or run inline with `python -c`:
-
-```python
-python -c "
-import real_ladybug as lb
-db = lb.Database('COW_PATH', read_only=True)
-conn = lb.Connection(db)
-result = conn.execute('MATCH (c:Concept) RETURN c.id, c.kind')
-# ... process results ...
-del conn; db.close()
-"
-```
+For validation queries against the COW copy (checking existing nodes, verifying structure), use `python -m theo.tools.query <cow_path> '<cypher>'`.
 
 ## Copy-on-Write (COW) Workflow
 
@@ -196,7 +186,7 @@ embedding = embed_text([text])[0]
 Then pass `embedding` as a property in the `upsert_node` call:
 
 ```bash
-python -m theo.tools.upsert_node "$COW_PATH" Concept '{"id": "auth-system", "name": "Authentication", "kind": "system", "level": 1, "description": "...", "notes": "...", "git_revision": "abc123...", "embedding": [0.12, -0.34, ...]}'
+python -m theo.tools.upsert_node "<cow_path>" Concept '{"id": "auth-system", "name": "Authentication", "kind": "system", "level": 1, "description": "...", "notes": "...", "git_revision": "abc123...", "embedding": [0.12, -0.34, ...]}'
 ```
 
 For efficiency, batch multiple texts into a single `embed_text()` call when upserting multiple nodes in sequence. The function accepts a list and returns embeddings in the same order.
@@ -233,11 +223,8 @@ If any check returns results, fix the inconsistency before committing.
 
 After calling `commit_write` to commit your changes, rebuild the HNSW vector indexes on the canonical DB so semantic search stays up-to-date:
 
-```python
-from theo.tools.manage_indexes import create_vector_indexes
-
-# Use the canonical DB path (same path used in commit_write)
-result = create_vector_indexes(db_path)
+```bash
+python -m theo.tools.manage_indexes <db_path> create
 ```
 
 This must happen after every commit. The vector indexes reference the embedding column data and need to be rebuilt whenever embeddings change.

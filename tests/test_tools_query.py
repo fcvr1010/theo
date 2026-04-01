@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from theo.tools.query import query
 
 
@@ -54,13 +56,8 @@ class TestToolsQuery:
 
     def test_query_read_only_default(self, populated_db: str) -> None:
         """Verify default read_only=True prevents mutations."""
-        # KuzuDB in read-only mode will raise on write attempts
-        # (the exact error varies by version, so just verify it raises)
-        try:
+        with pytest.raises(RuntimeError):
             query(populated_db, "CREATE (c:Concept {id: 'test'})")
-            # If it didn't raise, that's unexpected but not fatal for this test
-        except RuntimeError:
-            pass  # Expected: read-only mode rejects writes
 
     def test_query_read_write_mode(self, fresh_db: str) -> None:
         """Verify read_only=False allows mutations."""

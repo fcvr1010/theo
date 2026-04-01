@@ -46,9 +46,11 @@ def query(
     _log.info("[QUERY] %s (ro=%s): %s", db_path, read_only, cypher[:120])
     db = lb.Database(db_path, read_only=read_only)
     conn = lb.Connection(db)
-    rows = collect_rows(execute(conn, cypher))
-    del conn
-    db.close()
+    try:
+        rows = collect_rows(execute(conn, cypher))
+    finally:
+        del conn
+        db.close()
     return rows
 
 
