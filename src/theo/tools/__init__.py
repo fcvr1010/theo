@@ -8,6 +8,7 @@ from theo.tools.begin_write import begin_write
 from theo.tools.commit_write import commit_write
 from theo.tools.get_coverage import get_coverage
 from theo.tools.init_db import init_db
+from theo.tools.query import query
 from theo.tools.upsert_node import upsert_node
 from theo.tools.upsert_rel import upsert_rel
 
@@ -16,6 +17,7 @@ __all__ = [
     "commit_write",
     "get_coverage",
     "init_db",
+    "query",
     "upsert_node",
     "upsert_rel",
 ]
