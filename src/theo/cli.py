@@ -2,7 +2,14 @@
 
     theo [command] [options]
 
-Stub implementation -- prints version and usage for now.
+Commands:
+  add <url-or-path>   Register and clone a repository for indexing (stub)
+  remove <slug>       Remove a tracked repository (stub)
+  list                List all monitored repositories (stub)
+  stats [slug]        Show indexing statistics (stub)
+  daemon start        Start the background daemon
+  daemon stop         Stop the background daemon
+  daemon status       Show daemon status
 """
 
 from __future__ import annotations
@@ -15,16 +22,76 @@ _USAGE = f"""\
 theo {__version__} -- codebase intelligence agent
 
 Usage:
-  theo --version          Show version
-  theo --help             Show this help
-  theo add <path>         Add a repository to watch (stub)
-  theo remove <path>      Remove a watched repository (stub)
-  theo list               List monitored repositories and indexing status (stub)
-  theo stats [path]       Show indexing statistics (stub)
-  theo daemon start       Start the background daemon (stub)
-  theo daemon stop        Stop the background daemon (stub)
-  theo daemon status      Show daemon status (stub)
+  theo --version                          Show version
+  theo --help                             Show this help
+  theo add <path>                         Add a repository to watch (stub)
+  theo remove <path>                      Remove a watched repository (stub)
+  theo list                               List monitored repositories (stub)
+  theo stats [path]                       Show indexing statistics (stub)
+  theo daemon start [--foreground]        Start the background daemon
+  theo daemon stop                        Stop the background daemon
+  theo daemon status                      Show daemon status
 """
+
+
+def _cmd_daemon(args: list[str]) -> int:
+    """Handle ``theo daemon <start|stop|status>``."""
+    # Lazy imports to avoid pulling in heavy modules for --help / --version.
+    from theo.config import TheoConfig
+    from theo.daemon import Daemon, DaemonError
+    from theo.repo_manager import RepoManager
+
+    if not args:
+        print("Error: 'daemon' requires a subcommand (start|stop|status).", file=sys.stderr)
+        return 1
+
+    sub = args[0]
+    rest = args[1:]
+
+    cfg = TheoConfig()
+    cfg.ensure_dirs()
+    manager = RepoManager(cfg)
+    daemon = Daemon(cfg, manager)
+
+    if sub == "start":
+        foreground = "--foreground" in rest
+        try:
+            if foreground:
+                # Write PID file for consistency, then run in foreground.
+                daemon.pid_file.parent.mkdir(parents=True, exist_ok=True)
+                daemon.pid_file.write_text(str(__import__("os").getpid()))
+                print(f"Daemon running in foreground (pid={__import__('os').getpid()})")
+                try:
+                    daemon.run()
+                finally:
+                    daemon.pid_file.unlink(missing_ok=True)
+            else:
+                daemon.start()
+                print("Daemon started.")
+        except DaemonError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    if sub == "stop":
+        try:
+            daemon.stop()
+            print("Daemon stopped.")
+        except DaemonError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    if sub == "status":
+        st = daemon.status()
+        if st.running:
+            print(f"Daemon is running (pid={st.pid})")
+        else:
+            print("Daemon is not running.")
+        return 0
+
+    print(f"Error: unknown daemon subcommand '{sub}'.", file=sys.stderr)
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cmd = args[0]
+    cmd_args = args[1:]
 
     if cmd == "add":
         if len(args) < 2:
@@ -66,15 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if cmd == "daemon":
-        if len(args) < 2:
-            print("Error: 'daemon' requires a subcommand (start|stop|status).", file=sys.stderr)
-            return 1
-        sub = args[1]
-        if sub in ("start", "stop", "status"):
-            print(f"[stub] Would execute: daemon {sub}")
-            return 0
-        print(f"Error: unknown daemon subcommand '{sub}'.", file=sys.stderr)
-        return 1
+        return _cmd_daemon(cmd_args)
 
     print(f"Error: unknown command '{cmd}'. Run 'theo --help' for usage.", file=sys.stderr)
     return 1
