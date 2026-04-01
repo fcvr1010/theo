@@ -58,6 +58,7 @@ class TheoConfig:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         (self.base_dir / "logs").mkdir(parents=True, exist_ok=True)
         (self.base_dir / "db").mkdir(parents=True, exist_ok=True)
+        (self.base_dir / "repos").mkdir(parents=True, exist_ok=True)
 
 
 def resolve_db_path(repo: str) -> str:

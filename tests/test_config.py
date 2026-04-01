@@ -46,6 +46,7 @@ class TestTheoConfig:
         assert base.exists()
         assert (base / "logs").exists()
         assert (base / "db").exists()
+        assert (base / "repos").exists()
 
     def test_ensure_dirs_idempotent(self, tmp_path: Path) -> None:
         base = tmp_path / "idempotent"
