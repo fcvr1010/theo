@@ -26,6 +26,9 @@ from theo.repo_manager import (
     RepoNotFoundError,
     slug_from_url,
 )
+from theo.tools.get_coverage import get_coverage
+from theo.tools.init_db import init_db
+from theo.tools.node_counts import get_node_counts
 
 _USAGE = f"""\
 theo {__version__} -- codebase intelligence agent
@@ -72,7 +75,10 @@ def _cmd_add(
     frequency: int | None = None
     i = 0
     while i < len(rest):
-        if rest[i] == "--frequency" and i + 1 < len(rest):
+        if rest[i] == "--frequency":
+            if i + 1 >= len(rest):
+                print("Error: --frequency requires a value.", file=sys.stderr)
+                return 1
             try:
                 frequency = int(rest[i + 1])
             except ValueError:
@@ -95,8 +101,6 @@ def _cmd_add(
             print(f"Error: local path does not exist: {resolved}", file=sys.stderr)
             return 1
         url = f"file://{resolved}"
-
-    from theo.tools.init_db import init_db
 
     try:
         entry = manager.add(url, frequency_minutes=frequency)
@@ -137,10 +141,20 @@ def _cmd_remove(
         return 1
 
     target = args[0]
-    delete_data = "--delete-data" in args[1:]
+    rest = args[1:]
 
+    # Validate flags.
+    delete_data = False
+    for flag in rest:
+        if flag == "--delete-data":
+            delete_data = True
+        else:
+            print(f"Error: unknown option '{flag}'.", file=sys.stderr)
+            return 1
+
+    # Look up the entry first (before removing).
     try:
-        entry = manager.remove(target)
+        entry = manager.get(target)
     except RepoNotFoundError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -152,8 +166,11 @@ def _cmd_remove(
                 f"Delete clone ({entry.clone_path}) and DB ({entry.db_path})? [y/N] "
             )
             if answer.strip().lower() != "y":
-                print("Aborted. Tracking entry removed but data kept.")
+                print("Aborted. Data and tracking entry kept.")
                 return 0
+
+        # User confirmed (or non-interactive): remove tracking, then delete data.
+        manager.remove(target)
 
         clone_path = Path(entry.clone_path)
         db_path = Path(entry.db_path)
@@ -166,6 +183,7 @@ def _cmd_remove(
                 db_path.unlink()
         print(f"Removed: {entry.slug} (tracking entry + data deleted)")
     else:
+        manager.remove(target)
         print(f"Removed: {entry.slug} (tracking entry only)")
 
     return 0
@@ -203,36 +221,10 @@ def _get_coverage_str(entry: RepoEntry) -> str:
     if not db_exists or not clone_exists:
         return "N/A"
     try:
-        from theo.tools.get_coverage import get_coverage
-
         cov = get_coverage(entry.db_path, entry.clone_path)
         return f"{cov['coverage_pct']}% ({cov['indexed']}/{cov['total']} files)"
     except Exception:
         return "N/A"
-
-
-def _get_node_counts(db_path: str) -> dict[str, int]:
-    """Return concept and source-file counts from a LadybugDB database."""
-    import real_ladybug as lb
-
-    from theo._ext import collect_rows, execute
-
-    db = lb.Database(db_path, read_only=True)
-    conn = lb.Connection(db)
-    try:
-        concept_rows = collect_rows(
-            execute(conn, "MATCH (c:Concept) RETURN count(c) AS cnt")
-        )
-        file_rows = collect_rows(
-            execute(conn, "MATCH (f:SourceFile) RETURN count(f) AS cnt")
-        )
-    finally:
-        del conn
-        db.close()
-
-    concepts = int(concept_rows[0]["cnt"]) if concept_rows else 0
-    files = int(file_rows[0]["cnt"]) if file_rows else 0
-    return {"concepts": concepts, "source_files": files}
 
 
 def _print_entry_stats(entry: RepoEntry) -> None:
@@ -252,7 +244,7 @@ def _print_entry_stats(entry: RepoEntry) -> None:
         coverage_str = _get_coverage_str(entry)
         print(f"    Coverage:  {coverage_str}")
         try:
-            counts = _get_node_counts(entry.db_path)
+            counts = get_node_counts(entry.db_path)
             print(f"    Concepts:  {counts['concepts']}")
             print(f"    Files:     {counts['source_files']}")
         except Exception:

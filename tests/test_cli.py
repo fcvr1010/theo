@@ -13,7 +13,6 @@ from theo import __version__
 from theo.cli import _is_url, main
 from theo.config import TheoConfig
 from theo.repo_manager import RepoManager, slug_from_url
-from theo.tools.init_db import init_db
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
@@ -201,6 +200,15 @@ class TestAddCommand:
         assert exit_code == 1
         assert "unknown option" in capsys.readouterr().err.lower()
 
+    def test_add_frequency_missing_value(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        config: TheoConfig,
+    ) -> None:
+        exit_code = main(["add", "https://github.com/org/repo.git", "--frequency"], config=config)
+        assert exit_code == 1
+        assert "--frequency requires a value" in capsys.readouterr().err
+
     def test_add_duplicate_url(
         self,
         capsys: pytest.CaptureFixture[str],
@@ -304,6 +312,18 @@ class TestRemoveCommand:
         assert exit_code == 1
         assert "not found" in capsys.readouterr().err.lower()
 
+    def test_remove_unknown_option(
+        self,
+        capsys: pytest.CaptureFixture[str],
+        config: TheoConfig,
+        bare_repo: str,
+    ) -> None:
+        main(["add", bare_repo], config=config)
+        slug = slug_from_url(bare_repo)
+        exit_code = main(["remove", slug, "--force"], config=config)
+        assert exit_code == 1
+        assert "unknown option" in capsys.readouterr().err.lower()
+
     def test_remove_with_delete_data(
         self,
         capsys: pytest.CaptureFixture[str],
@@ -363,6 +383,9 @@ class TestRemoveCommand:
         assert "Aborted" in capsys.readouterr().out
         # Clone directory should still exist since the user declined.
         assert clone_dir.exists()
+        # Tracking entry should also still exist.
+        manager = RepoManager(config)
+        assert len(manager.list()) == 1
 
 
 # ── list command ─────────────────────────────────────────────────────────
