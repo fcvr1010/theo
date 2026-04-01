@@ -42,8 +42,24 @@ class TheoConfig:
     embedding_model: str = field(default_factory=_default_embedding_model)
     embedding_dim: int = field(default_factory=_default_embedding_dim)
 
+    def db_path_for_repo(self, repo: str) -> str:
+        """Return the database path for a given repository name.
+
+        Convention: ``{base_dir}/db/{repo}``.  The *repo* argument is a
+        short identifier (e.g. ``"vito"``, ``"theo"``) -- it must not
+        contain path separators.
+        """
+        if "/" in repo or "\\" in repo:
+            raise ValueError(f"repo must be a simple name without path separators, got: {repo!r}")
+        return str(self.base_dir / "db" / repo)
+
     def ensure_dirs(self) -> None:
         """Create the base directory and standard subdirectories if they do not exist."""
         self.base_dir.mkdir(parents=True, exist_ok=True)
         (self.base_dir / "logs").mkdir(parents=True, exist_ok=True)
         (self.base_dir / "db").mkdir(parents=True, exist_ok=True)
+
+
+def resolve_db_path(repo: str) -> str:
+    """Convenience: resolve a repo name to its database path using default config."""
+    return TheoConfig().db_path_for_repo(repo)

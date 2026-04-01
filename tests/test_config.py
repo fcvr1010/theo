@@ -85,3 +85,23 @@ class TestTheoConfig:
         with patch.dict(os.environ, {"THEO_EMBEDDING_DIM": "384"}):
             config = TheoConfig()
             assert config.embedding_dim == 384
+
+    def test_db_path_for_repo(self, tmp_path: Path) -> None:
+        config = TheoConfig(base_dir=tmp_path)
+        assert config.db_path_for_repo("my-repo") == str(tmp_path / "db" / "my-repo")
+
+    def test_db_path_for_repo_rejects_slashes(self, tmp_path: Path) -> None:
+        import pytest
+
+        config = TheoConfig(base_dir=tmp_path)
+        with pytest.raises(ValueError, match="path separators"):
+            config.db_path_for_repo("foo/bar")
+        with pytest.raises(ValueError, match="path separators"):
+            config.db_path_for_repo("foo\\bar")
+
+    def test_resolve_db_path(self, tmp_path: Path) -> None:
+        from theo.config import resolve_db_path
+
+        with patch.dict(os.environ, {"THEO_BASE_DIR": str(tmp_path)}):
+            result = resolve_db_path("test-repo")
+            assert result == str(tmp_path / "db" / "test-repo")
