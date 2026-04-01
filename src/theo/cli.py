@@ -2,32 +2,296 @@
 
     theo [command] [options]
 
-Stub implementation -- prints version and usage for now.
+Commands:
+  add <url-or-path>   Register and clone a repository for indexing
+  remove <slug>       Remove a tracked repository
+  list                List all monitored repositories
+  stats [slug]        Show indexing statistics
 """
 
 from __future__ import annotations
 
+import re
+import shutil
 import sys
+from pathlib import Path
+from typing import Any
 
 from theo import __version__
+from theo.config import TheoConfig
+from theo.repo_manager import (
+    GitOperationError,
+    RepoEntry,
+    RepoManager,
+    RepoNotFoundError,
+    slug_from_url,
+)
 
 _USAGE = f"""\
 theo {__version__} -- codebase intelligence agent
 
 Usage:
-  theo --version          Show version
-  theo --help             Show this help
-  theo add <path>         Add a repository to watch (stub)
-  theo remove <path>      Remove a watched repository (stub)
-  theo list               List monitored repositories and indexing status (stub)
-  theo stats [path]       Show indexing statistics (stub)
-  theo daemon start       Start the background daemon (stub)
-  theo daemon stop        Stop the background daemon (stub)
-  theo daemon status      Show daemon status (stub)
+  theo --version                          Show version
+  theo --help                             Show this help
+  theo add <url-or-path> [--frequency N]  Add a repository (URL or local path)
+  theo remove <path-or-slug> [--delete-data]  Remove a watched repository
+  theo list                               List monitored repositories
+  theo stats [path-or-slug]               Show indexing statistics
+  theo daemon start                       Start the background daemon (stub)
+  theo daemon stop                        Stop the background daemon (stub)
+  theo daemon status                      Show daemon status (stub)
 """
 
+# Regex for SCP-style SSH URLs: git@host:path
+_SCP_RE = re.compile(r"^[\w.-]+@[\w.-]+:.+$")
 
-def main(argv: list[str] | None = None) -> int:
+
+def _is_url(target: str) -> bool:
+    """Return True if *target* looks like a URL rather than a local path."""
+    if "://" in target:
+        return True
+    if _SCP_RE.match(target):
+        return True
+    return False
+
+
+def _cmd_add(
+    args: list[str],
+    config: TheoConfig,
+    manager: RepoManager,
+) -> int:
+    """Handle ``theo add <url-or-path> [--frequency N]``."""
+    if not args:
+        print("Error: 'add' requires a URL or path argument.", file=sys.stderr)
+        return 1
+
+    target = args[0]
+    rest = args[1:]
+
+    # Parse --frequency flag.
+    frequency: int | None = None
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--frequency" and i + 1 < len(rest):
+            try:
+                frequency = int(rest[i + 1])
+            except ValueError:
+                print(
+                    f"Error: --frequency requires an integer, got '{rest[i + 1]}'.",
+                    file=sys.stderr,
+                )
+                return 1
+            i += 2
+        else:
+            print(f"Error: unknown option '{rest[i]}'.", file=sys.stderr)
+            return 1
+
+    # Determine URL vs local path.
+    if _is_url(target):
+        url = target
+    else:
+        resolved = Path(target).resolve()
+        if not resolved.exists():
+            print(f"Error: local path does not exist: {resolved}", file=sys.stderr)
+            return 1
+        url = f"file://{resolved}"
+
+    from theo.tools.init_db import init_db
+
+    try:
+        entry = manager.add(url, frequency_minutes=frequency)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # Clone the repository.
+    try:
+        manager.clone(entry.slug)
+    except GitOperationError as exc:
+        # Roll back the tracking entry on clone failure.
+        try:
+            manager.remove(entry.slug)
+        except RepoNotFoundError:
+            pass
+        print(f"Error: clone failed -- {exc}", file=sys.stderr)
+        return 1
+
+    # Initialise the database.
+    init_db(entry.db_path)
+
+    print(f"Added: {entry.slug}")
+    print(f"  URL:    {entry.url}")
+    print(f"  Clone:  {entry.clone_path}")
+    print(f"  DB:     {entry.db_path}")
+    return 0
+
+
+def _cmd_remove(
+    args: list[str],
+    config: TheoConfig,
+    manager: RepoManager,
+) -> int:
+    """Handle ``theo remove <path-or-slug> [--delete-data]``."""
+    if not args:
+        print("Error: 'remove' requires a path or slug argument.", file=sys.stderr)
+        return 1
+
+    target = args[0]
+    delete_data = "--delete-data" in args[1:]
+
+    try:
+        entry = manager.remove(target)
+    except RepoNotFoundError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    if delete_data:
+        # Prompt for confirmation if stdin is a TTY.
+        if sys.stdin.isatty():
+            answer = input(
+                f"Delete clone ({entry.clone_path}) and DB ({entry.db_path})? [y/N] "
+            )
+            if answer.strip().lower() != "y":
+                print("Aborted. Tracking entry removed but data kept.")
+                return 0
+
+        clone_path = Path(entry.clone_path)
+        db_path = Path(entry.db_path)
+        if clone_path.exists():
+            shutil.rmtree(clone_path)
+        if db_path.exists():
+            if db_path.is_dir():
+                shutil.rmtree(db_path)
+            else:
+                db_path.unlink()
+        print(f"Removed: {entry.slug} (tracking entry + data deleted)")
+    else:
+        print(f"Removed: {entry.slug} (tracking entry only)")
+
+    return 0
+
+
+def _cmd_list(
+    args: list[str],
+    config: TheoConfig,
+    manager: RepoManager,
+) -> int:
+    """Handle ``theo list``."""
+    entries = manager.list()
+    if not entries:
+        print("No repositories registered. Use 'theo add <url>' to add one.")
+        return 0
+
+    for entry in entries:
+        coverage_str = _get_coverage_str(entry)
+        last_run = entry.last_run_at or "never"
+        print(f"  {entry.slug}")
+        print(f"    URL:      {entry.url}")
+        print(f"    DB:       {entry.db_path}")
+        print(f"    Coverage: {coverage_str}")
+        print(f"    Last run: {last_run}")
+    return 0
+
+
+def _get_coverage_str(entry: RepoEntry) -> str:
+    """Return a human-readable coverage string for a repo entry.
+
+    Returns 'N/A' if the DB or clone directory does not exist.
+    """
+    db_exists = Path(entry.db_path).exists()
+    clone_exists = Path(entry.clone_path).exists()
+    if not db_exists or not clone_exists:
+        return "N/A"
+    try:
+        from theo.tools.get_coverage import get_coverage
+
+        cov = get_coverage(entry.db_path, entry.clone_path)
+        return f"{cov['coverage_pct']}% ({cov['indexed']}/{cov['total']} files)"
+    except Exception:
+        return "N/A"
+
+
+def _get_node_counts(db_path: str) -> dict[str, int]:
+    """Return concept and source-file counts from a LadybugDB database."""
+    import real_ladybug as lb
+
+    from theo._ext import collect_rows, execute
+
+    db = lb.Database(db_path, read_only=True)
+    conn = lb.Connection(db)
+    try:
+        concept_rows = collect_rows(
+            execute(conn, "MATCH (c:Concept) RETURN count(c) AS cnt")
+        )
+        file_rows = collect_rows(
+            execute(conn, "MATCH (f:SourceFile) RETURN count(f) AS cnt")
+        )
+    finally:
+        del conn
+        db.close()
+
+    concepts = int(concept_rows[0]["cnt"]) if concept_rows else 0
+    files = int(file_rows[0]["cnt"]) if file_rows else 0
+    return {"concepts": concepts, "source_files": files}
+
+
+def _print_entry_stats(entry: RepoEntry) -> None:
+    """Print detailed stats for a single repo entry."""
+    print(f"  {entry.slug}")
+    print(f"    URL:       {entry.url}")
+    print(f"    Clone:     {entry.clone_path}")
+    print(f"    DB:        {entry.db_path}")
+    print(f"    Frequency: every {entry.frequency_minutes} min")
+    print(f"    Last SHA:  {entry.last_checked_revision or 'none'}")
+    print(f"    Last run:  {entry.last_run_at or 'never'}")
+
+    db_exists = Path(entry.db_path).exists()
+    clone_exists = Path(entry.clone_path).exists()
+
+    if db_exists and clone_exists:
+        coverage_str = _get_coverage_str(entry)
+        print(f"    Coverage:  {coverage_str}")
+        try:
+            counts = _get_node_counts(entry.db_path)
+            print(f"    Concepts:  {counts['concepts']}")
+            print(f"    Files:     {counts['source_files']}")
+        except Exception:
+            print("    Concepts:  N/A")
+            print("    Files:     N/A")
+    else:
+        missing = []
+        if not clone_exists:
+            missing.append("clone")
+        if not db_exists:
+            missing.append("database")
+        print(f"    Coverage:  N/A (missing: {', '.join(missing)})")
+
+
+def _cmd_stats(
+    args: list[str],
+    config: TheoConfig,
+    manager: RepoManager,
+) -> int:
+    """Handle ``theo stats [path-or-slug]``."""
+    if args:
+        target = args[0]
+        try:
+            entry = manager.get(target)
+        except RepoNotFoundError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        _print_entry_stats(entry)
+    else:
+        entries = manager.list()
+        if not entries:
+            print("No repositories registered. Use 'theo add <url>' to add one.")
+            return 0
+        for entry in entries:
+            _print_entry_stats(entry)
+    return 0
+
+
+def main(argv: list[str] | None = None, config: TheoConfig | None = None) -> int:
     """CLI entry point. Returns exit code."""
     args = argv if argv is not None else sys.argv[1:]
 
@@ -39,37 +303,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"theo {__version__}")
         return 0
 
+    cfg = config or TheoConfig()
+    cfg.ensure_dirs()
+    manager = RepoManager(cfg)
+
     cmd = args[0]
+    cmd_args = args[1:]
 
-    if cmd == "add":
-        if len(args) < 2:
-            print("Error: 'add' requires a path argument.", file=sys.stderr)
-            return 1
-        print(f"[stub] Would add repository: {args[1]}")
-        return 0
+    handlers: dict[str, Any] = {
+        "add": _cmd_add,
+        "remove": _cmd_remove,
+        "list": _cmd_list,
+        "stats": _cmd_stats,
+    }
 
-    if cmd == "remove":
-        if len(args) < 2:
-            print("Error: 'remove' requires a path argument.", file=sys.stderr)
-            return 1
-        print(f"[stub] Would remove repository: {args[1]}")
-        return 0
-
-    if cmd == "list":
-        print("[stub] Monitored repositories:")
-        print("  <path>  db: <db_path>  coverage: <N>%  last indexed: <timestamp>")
-        return 0
-
-    if cmd == "stats":
-        path = args[1] if len(args) > 1 else "."
-        print(f"[stub] Would show stats for: {path}")
-        return 0
+    if cmd in handlers:
+        return handlers[cmd](cmd_args, cfg, manager)
 
     if cmd == "daemon":
-        if len(args) < 2:
+        if len(cmd_args) < 1:
             print("Error: 'daemon' requires a subcommand (start|stop|status).", file=sys.stderr)
             return 1
-        sub = args[1]
+        sub = cmd_args[0]
         if sub in ("start", "stop", "status"):
             print(f"[stub] Would execute: daemon {sub}")
             return 0
