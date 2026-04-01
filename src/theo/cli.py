@@ -57,14 +57,10 @@ def _cmd_daemon(args: list[str]) -> int:
         foreground = "--foreground" in rest
         try:
             if foreground:
-                # Write PID file for consistency, then run in foreground.
-                daemon.pid_file.parent.mkdir(parents=True, exist_ok=True)
-                daemon.pid_file.write_text(str(__import__("os").getpid()))
-                print(f"Daemon running in foreground (pid={__import__('os').getpid()})")
-                try:
-                    daemon.run()
-                finally:
-                    daemon.pid_file.unlink(missing_ok=True)
+                import os
+
+                print(f"Daemon running in foreground (pid={os.getpid()})")
+                daemon.run_foreground()
             else:
                 daemon.start()
                 print("Daemon started.")

@@ -7,11 +7,12 @@ tracked repositories and optionally invokes a lens callback when changes
 are detected.
 
 Process lifecycle:
-- ``start()``  -- double-fork daemonization, writes PID file.
-- ``stop()``   -- sends SIGTERM (then SIGKILL after 10s), removes PID file.
-- ``status()`` -- reads PID file, checks process liveness.
-- ``run()``    -- foreground event loop (called by the daemonized child).
-- ``tick()``   -- single iteration: check each repo, pull if due, invoke callback.
+- ``start()``          -- double-fork daemonization, writes PID file.
+- ``run_foreground()`` -- foreground mode with PID file lifecycle.
+- ``stop()``           -- sends SIGTERM (then SIGKILL after 10s), removes PID file.
+- ``status()``         -- reads PID file, checks process liveness.
+- ``run()``            -- foreground event loop (called by the daemonized child).
+- ``tick()``           -- single iteration: check each repo, pull if due, invoke callback.
 """
 
 from __future__ import annotations
@@ -31,7 +32,6 @@ from theo.repo_manager import PullResult, RepoEntry, RepoManager
 
 _log = get_logger("daemon")
 
-_TICK_INTERVAL = 60  # seconds between ticks
 _STOP_TIMEOUT = 10  # seconds to wait after SIGTERM before SIGKILL
 
 
@@ -57,6 +57,7 @@ class Daemon:
         lens_callback: Optional callback invoked when a pull detects changes.
             Signature: ``(entry, pull_result) -> None``.  If *None*, the daemon
             runs in pull-only mode (no lens invocation).
+        tick_interval: Seconds between ticks (default 60).
     """
 
     def __init__(
@@ -64,10 +65,12 @@ class Daemon:
         config: TheoConfig,
         repo_manager: RepoManager,
         lens_callback: Callable[[RepoEntry, PullResult], None] | None = None,
+        tick_interval: int = 60,
     ) -> None:
         self._config = config
         self._repo_manager = repo_manager
         self._lens_callback = lens_callback
+        self._tick_interval = tick_interval
         self._shutdown = False
 
     # ── Properties ────────────────────────────────────────────────────────
@@ -109,6 +112,24 @@ class Daemon:
             os._exit(0)
 
         # Grandchild -- the actual daemon process.
+        self._run_as_daemon()
+
+    def run_foreground(self) -> None:
+        """Run the daemon in the foreground with PID file lifecycle.
+
+        Writes the PID file, calls :meth:`run`, and cleans up the PID file
+        on exit.  Intended for ``theo daemon start --foreground``.
+        """
+        self.pid_file.parent.mkdir(parents=True, exist_ok=True)
+        self.pid_file.write_text(str(os.getpid()))
+        _log.info("Daemon running in foreground (pid=%d)", os.getpid())
+        try:
+            self.run()
+        finally:
+            self._remove_pid_file()
+
+    def _run_as_daemon(self) -> None:
+        """Grandchild process logic: redirect stdio, write PID, run, clean up."""
         # Redirect stdin/stdout/stderr to /dev/null.
         devnull = os.open(os.devnull, os.O_RDWR)
         os.dup2(devnull, sys.stdin.fileno())
@@ -126,8 +147,7 @@ class Daemon:
             self.run()
         finally:
             # Clean up PID file on exit.
-            if self.pid_file.exists():
-                self.pid_file.unlink()
+            self._remove_pid_file()
             os._exit(0)
 
     def stop(self) -> None:
@@ -255,7 +275,7 @@ class Daemon:
                 _log.exception("Unexpected error in tick")
 
             # Sleep in small increments so we can respond to shutdown quickly.
-            for _ in range(_TICK_INTERVAL):
+            for _ in range(self._tick_interval):
                 if self._shutdown:
                     break
                 time.sleep(1)

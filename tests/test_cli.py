@@ -159,6 +159,23 @@ class TestDaemonCommand:
     @patch("theo.daemon.Daemon")
     @patch("theo.repo_manager.RepoManager")
     @patch("theo.config.TheoConfig")
+    def test_daemon_start_foreground_calls_run_foreground(
+        self,
+        mock_config_cls: MagicMock,
+        mock_manager_cls: MagicMock,
+        mock_daemon_cls: MagicMock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        mock_daemon = mock_daemon_cls.return_value
+        exit_code = main(["daemon", "start", "--foreground"])
+        assert exit_code == 0
+        mock_daemon.run_foreground.assert_called_once()
+        output = capsys.readouterr().out
+        assert "foreground" in output.lower()
+
+    @patch("theo.daemon.Daemon")
+    @patch("theo.repo_manager.RepoManager")
+    @patch("theo.config.TheoConfig")
     def test_daemon_status_running(
         self,
         mock_config_cls: MagicMock,

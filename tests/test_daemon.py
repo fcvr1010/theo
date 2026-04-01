@@ -289,6 +289,17 @@ class TestTick:
 
         manager.pull.assert_called_once_with("test-repo")
 
+    def test_repo_due_at_exact_boundary(self, daemon: Daemon, manager: MagicMock) -> None:
+        """A repo is due when elapsed_minutes == frequency_minutes exactly (>= boundary)."""
+        exactly_30_ago = (datetime.now(UTC) - timedelta(minutes=30)).isoformat()
+        entry = _make_entry(last_run_at=exactly_30_ago, frequency_minutes=30)
+        manager.list.return_value = [entry]
+        manager.pull.return_value = _make_pull_result(changed=False)
+
+        daemon.tick()
+
+        manager.pull.assert_called_once_with("test-repo")
+
     def test_lens_callback_invoked_on_changes(
         self, config: TheoConfig, manager: MagicMock
     ) -> None:
@@ -385,6 +396,33 @@ class TestTick:
         manager.list.return_value = []
         daemon.tick()
         manager.pull.assert_not_called()
+
+
+# ── run_foreground() ──────────────────────────────────────────────────────
+
+
+class TestRunForeground:
+    """Test the run_foreground() method."""
+
+    @patch("theo.daemon.time.sleep")
+    def test_writes_pid_and_cleans_up(self, mock_sleep: MagicMock, daemon: Daemon) -> None:
+        """run_foreground() should write PID file, call run(), and remove PID file."""
+        original_sigterm = signal.getsignal(signal.SIGTERM)
+        original_sigint = signal.getsignal(signal.SIGINT)
+        try:
+            def stop_on_tick() -> None:
+                # PID file should exist while running.
+                assert daemon.pid_file.exists()
+                daemon._shutdown = True
+
+            with patch.object(daemon, "tick", side_effect=stop_on_tick):
+                daemon.run_foreground()
+
+            # PID file should be cleaned up after run_foreground() returns.
+            assert not daemon.pid_file.exists()
+        finally:
+            signal.signal(signal.SIGTERM, original_sigterm)
+            signal.signal(signal.SIGINT, original_sigint)
 
 
 # ── run() ────────────────────────────────────────────────────────────────
