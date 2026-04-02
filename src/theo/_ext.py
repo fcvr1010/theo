@@ -8,6 +8,40 @@ from typing import Any
 import real_ladybug as lb
 
 
+def run_cypher(
+    db_path: str,
+    cypher: str,
+    *,
+    read_only: bool = True,
+    parameters: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Open a database, execute a single Cypher statement, and return rows.
+
+    This is the canonical open-execute-close lifecycle shared by all code that
+    needs to run a query against a database path.  Callers should add their own
+    access-control checks (e.g. mutation-keyword guards) *before* calling this
+    helper.
+
+    Args:
+        db_path: Absolute path to the KuzuDB database directory.
+        cypher: The Cypher query string.
+        read_only: If ``True`` (default), open the database in read-only mode.
+        parameters: Optional parameter dict for parameterised queries.
+
+    Returns:
+        A list of result rows, each represented as a dict mapping column names
+        to values.
+    """
+    db = lb.Database(db_path, read_only=read_only)
+    conn = lb.Connection(db)
+    try:
+        rows = collect_rows(execute(conn, cypher, parameters))
+    finally:
+        del conn
+        db.close()
+    return rows
+
+
 def load_vector_ext(conn: lb.Connection) -> None:
     """Install (once) and load the VECTOR extension for a connection."""
     with contextlib.suppress(RuntimeError):
