@@ -35,7 +35,5 @@ def load_prompt(lens_name: str) -> str:
 
     prompt_path = _LENS_DIR / f"{lens_name}_prompt.md"
     if not prompt_path.is_file():
-        raise FileNotFoundError(
-            f"No prompt file for lens {lens_name!r}: expected {prompt_path}"
-        )
+        raise FileNotFoundError(f"No prompt file for lens {lens_name!r}: expected {prompt_path}")
     return prompt_path.read_text(encoding="utf-8")
