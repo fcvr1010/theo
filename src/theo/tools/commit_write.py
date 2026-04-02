@@ -6,7 +6,10 @@ Commit a copy-on-write (COW) session by atomically replacing the main DB.
 Uses os.rename() for an atomic same-filesystem rename.  Cleans up any
 leftover sidecar files (.bak, .stale, old COW WAL files).
 
-Returns: {status: "ok", cow_path: str, db_path: str}
+After the atomic rename, automatically rebuilds HNSW vector indexes on the
+canonical DB so semantic search stays up-to-date.
+
+Returns: {status: "ok", cow_path: str, db_path: str, indexes_rebuilt: bool}
 """
 
 from __future__ import annotations
@@ -45,7 +48,19 @@ def commit_write(cow_path: str, db_path: str) -> dict[str, Any]:
         for f in db_dir.glob(pattern):
             f.unlink(missing_ok=True)
 
-    return {"status": "ok", "cow_path": cow_path, "db_path": db_path}
+    # Automatically rebuild HNSW vector indexes on the canonical DB.
+    indexes_rebuilt = False
+    try:
+        from theo.tools.manage_indexes import create_vector_indexes
+
+        _log.info("[WRITE] Rebuilding HNSW vector indexes after commit")
+        idx_result = create_vector_indexes(db_path)
+        indexes_rebuilt = idx_result.get("status") == "ok"
+        _log.info("[WRITE] Index rebuild complete: %s", idx_result.get("indexes", []))
+    except Exception:
+        _log.exception("[WRITE] Failed to rebuild HNSW indexes after commit")
+
+    return {"status": "ok", "cow_path": cow_path, "db_path": db_path, "indexes_rebuilt": indexes_rebuilt}
 
 
 if __name__ == "__main__":

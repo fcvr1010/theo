@@ -6,7 +6,12 @@ MERGE (upsert) a node in the code-intelligence graph.
 table: "Concept" | "SourceFile"
 properties: dict with the primary key and any fields to set.
 
-Returns: {status: "ok", table, key}
+Automatically computes a semantic embedding from the node's ``description``
+and ``notes`` fields whenever either is present in *properties*.  The caller
+does NOT need to compute or pass an ``embedding`` vector -- it is derived
+transparently.
+
+Returns: {status: "ok", table, key, embedding_computed: bool}
 """
 
 from __future__ import annotations
@@ -20,6 +25,27 @@ from theo._schema import ALLOWED_TABLES, FIELD_RE, PK_MAP
 
 _log = get_logger("upsert_node")
 
+# Text fields that feed into the semantic embedding.
+_EMBEDDING_TEXT_FIELDS: tuple[str, ...] = ("description", "notes")
+
+
+def _compute_embedding(properties: dict[str, Any]) -> list[float] | None:
+    """Compute an embedding from description/notes if either is present.
+
+    Returns the embedding vector, or ``None`` if no text fields are available
+    to embed.  Imports ``embed_text`` lazily to avoid loading the model on
+    every upsert that does not need it.
+    """
+    parts = [properties.get(f) or "" for f in _EMBEDDING_TEXT_FIELDS]
+    text = "\n\n".join(parts).strip()
+    if not text:
+        return None
+
+    from theo._embed import embed_text
+
+    _log.info("[EMBED] Auto-computing embedding for upsert (%d chars)", len(text))
+    return embed_text([text])[0]
+
 
 def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[str, Any]:
     if table not in ALLOWED_TABLES:
@@ -27,6 +53,15 @@ def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[st
     for k in properties:
         if not FIELD_RE.match(k):
             raise ValueError(f"Invalid field name: {k!r}")
+
+    # Auto-compute embedding when description or notes are provided.
+    embedding_computed = False
+    has_text_fields = any(properties.get(f) for f in _EMBEDDING_TEXT_FIELDS)
+    if has_text_fields:
+        embedding = _compute_embedding(properties)
+        if embedding is not None:
+            properties = {**properties, "embedding": embedding}
+            embedding_computed = True
 
     db = lb.Database(db_path)
     conn = lb.Connection(db)
@@ -53,7 +88,7 @@ def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[st
     del conn
     db.close()
 
-    return {"status": "ok", "table": table, "key": pk_value}
+    return {"status": "ok", "table": table, "key": pk_value, "embedding_computed": embedding_computed}
 
 
 if __name__ == "__main__":
