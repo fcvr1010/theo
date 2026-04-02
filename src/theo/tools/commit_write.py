@@ -60,7 +60,12 @@ def commit_write(cow_path: str, db_path: str) -> dict[str, Any]:
     except Exception:
         _log.exception("[WRITE] Failed to rebuild HNSW indexes after commit")
 
-    return {"status": "ok", "cow_path": cow_path, "db_path": db_path, "indexes_rebuilt": indexes_rebuilt}
+    return {
+        "status": "ok",
+        "cow_path": cow_path,
+        "db_path": db_path,
+        "indexes_rebuilt": indexes_rebuilt,
+    }
 
 
 if __name__ == "__main__":

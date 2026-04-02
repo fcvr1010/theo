@@ -93,7 +93,12 @@ def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[st
     del conn
     db.close()
 
-    return {"status": "ok", "table": table, "key": pk_value, "embedding_computed": embedding_computed}
+    return {
+        "status": "ok",
+        "table": table,
+        "key": pk_value,
+        "embedding_computed": embedding_computed,
+    }
 
 
 if __name__ == "__main__":

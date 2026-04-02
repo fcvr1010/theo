@@ -102,9 +102,12 @@ class TestArchitectPromptContent:
     def test_git_revision_in_schema(self, prompt: str) -> None:
         assert "git_revision" in prompt
 
-    def test_embedding_instructions(self, prompt: str) -> None:
-        assert "theo._embed" in prompt
-        assert "embed_text" in prompt
+    def test_embedding_is_invisible_to_model(self, prompt: str) -> None:
+        # Embedding computation is internal to the tools -- the prompt should
+        # NOT mention implementation details like theo._embed or embed_text.
+        assert "theo._embed" not in prompt
+        assert "embed_text" not in prompt
+        assert "Automatic embeddings" not in prompt
 
     def test_repository_agnostic_heuristics(self, prompt: str) -> None:
         assert "## Repository-Agnostic Heuristics" in prompt
