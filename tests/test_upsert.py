@@ -88,9 +88,7 @@ class TestUpsertNode:
 
     def test_embedding_field_rejected(self, fresh_db: str) -> None:
         with pytest.raises(ValueError, match="Unknown field"):
-            upsert_node(
-                fresh_db, "Concept", {"id": "x", "embedding": [0.1] * 768}
-            )
+            upsert_node(fresh_db, "Concept", {"id": "x", "embedding": [0.1] * 768})
 
     def test_missing_pk_raises(self, fresh_db: str) -> None:
         with pytest.raises(KeyError):

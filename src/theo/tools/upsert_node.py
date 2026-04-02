@@ -55,8 +55,7 @@ def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[st
     bad = {k for k in properties if k not in allowed}
     if bad:
         raise ValueError(
-            f"Unknown field(s) for {table}: {sorted(bad)}. "
-            f"Allowed fields: {sorted(allowed)}"
+            f"Unknown field(s) for {table}: {sorted(bad)}. Allowed fields: {sorted(allowed)}"
         )
 
     # Auto-compute embedding when description or notes are present in properties
