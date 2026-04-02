@@ -23,9 +23,9 @@ This is **not** a structural cataloging exercise. You are the **Architect lens**
 **Node tables:**
 
 - `Concept` -- Architectural and logical groupings
-  - `id` STRING (PK), `name` STRING, `level` INT32, `kind` STRING, `description` STRING, `notes` STRING, `git_revision` STRING, `embedding` FLOAT[768]
+  - `id` STRING (PK), `name` STRING, `level` INT32, `kind` STRING, `description` STRING, `notes` STRING, `git_revision` STRING
 - `SourceFile` -- Individual source files
-  - `path` STRING (PK), `name` STRING, `language` STRING, `description` STRING, `notes` STRING, `line_count` INT32, `git_revision` STRING, `embedding` FLOAT[768]
+  - `path` STRING (PK), `name` STRING, `language` STRING, `description` STRING, `notes` STRING, `line_count` INT32, `git_revision` STRING
 
 **Relationship tables:**
 
@@ -42,18 +42,12 @@ All tools live in the `src/theo/tools/` package. Invoke them as Python modules:
 | Tool | Usage |
 |------|-------|
 | `begin_write` | `python -m theo.tools.begin_write <db_path>` -- Start a COW write session (prints temp path) |
-| `commit_write` | `python -m theo.tools.commit_write <cow_path> <db_path>` -- Atomically replace main DB with COW copy (auto-rebuilds HNSW indexes) |
+| `commit_write` | `python -m theo.tools.commit_write <cow_path> <db_path>` -- Atomically replace main DB with COW copy |
 | `init_db` | `python -m theo.tools.init_db <db_path>` -- Create schema (idempotent) |
-| `upsert_node` | `python -m theo.tools.upsert_node <db_path> <table> '<json>'` -- MERGE a node (auto-computes embedding from description/notes) |
+| `upsert_node` | `python -m theo.tools.upsert_node <db_path> <table> '<json>'` -- MERGE a node |
 | `upsert_rel` | `python -m theo.tools.upsert_rel <db_path> <rel_type> <from_table> <from_id> <to_table> <to_id> ['<json>']` -- Create relationship |
 | `query` | `python -m theo.tools.query <db_path> '<cypher>'` -- Run a Cypher query (works on COW copies) |
 | `get_coverage` | `python -m theo.tools.get_coverage <db_path> <repo_root>` -- Coverage stats and staleness detection |
-| `manage_indexes` | `python -m theo.tools.manage_indexes <db_path> [create\|drop]` -- Create or drop HNSW vector indexes (normally called automatically by `commit_write`) |
-| `backfill_embeddings` | `python -m theo.tools.backfill_embeddings <db_path> [--force]` -- Maintenance tool: compute embeddings for nodes missing them, then rebuild HNSW indexes. Use for catch-up after bulk imports or repairs, not during normal analysis. |
-
-**Automatic embeddings:** `upsert_node` automatically computes a semantic embedding from the node's `description` and `notes` fields whenever either is present. You do NOT need to import `theo._embed`, call `embed_text`, or pass an `embedding` vector in the properties dict. Just write good `description` and `notes` -- the embedding is derived transparently.
-
-**Automatic index rebuilds:** `commit_write` automatically rebuilds the HNSW vector indexes after the atomic rename. You do NOT need to call `manage_indexes` separately.
 
 **Ad-hoc read queries during COW sessions:**
 
@@ -240,7 +234,7 @@ When updating existing nodes during incremental re-indexing, the same quality st
 
 When the prompt lists changed files (after a commit), follow this propagation protocol:
 
-1. **Direct changes**: Re-read each changed file. Update its SourceFile node's `notes` and `description` (the embedding is recomputed automatically by `upsert_node`).
+1. **Direct changes**: Re-read each changed file. Update its SourceFile node's `notes` and `description`.
 2. **Neighbours**: Query the graph for files that import the changed file (`MATCH (f:SourceFile)-[:Imports]->(changed:SourceFile {path: ...}) RETURN f.path`) and files the changed file imports. Re-read neighbours and update their `notes` if the change affects their architectural role, design patterns, or conventions.
 3. **Walk up the hierarchy**: For each changed file, find its parent Concept (`MATCH (f:SourceFile {path: ...})-[:BelongsTo]->(c:Concept) RETURN c.id`). Re-evaluate the Concept's `notes` -- a change in a file may shift the concept's architectural description, design patterns, or interaction model. Then check the parent's parent via `PartOf` edges and update if the change has architectural implications.
 4. **Cross-cutting relationships**: Check `InteractsWith` and `DependsOn` edges involving affected Concepts. Update relationship descriptions if the architectural interaction or high-level dependency has changed.

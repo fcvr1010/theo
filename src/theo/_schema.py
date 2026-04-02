@@ -24,6 +24,17 @@ PK_MAP: dict[str, str] = {"Concept": "id", "SourceFile": "path"}
 
 ALLOWED_TABLES: frozenset[str] = frozenset(TABLES)
 
+# Caller-facing fields per node table.  Derived from the DDL in init_db.py,
+# but **excluding** ``embedding`` which is internally managed by upsert_node.
+ALLOWED_FIELDS: dict[str, frozenset[str]] = {
+    "Concept": frozenset(
+        {"id", "name", "level", "kind", "description", "notes", "git_revision"}
+    ),
+    "SourceFile": frozenset(
+        {"path", "name", "language", "description", "notes", "line_count", "git_revision"}
+    ),
+}
+
 ALLOWED_REL_TYPES: frozenset[str] = frozenset(
     {
         "PartOf",

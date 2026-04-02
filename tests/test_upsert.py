@@ -79,8 +79,18 @@ class TestUpsertNode:
             upsert_node(fresh_db, "NonExistent", {"id": "x"})
 
     def test_invalid_field_name_raises(self, fresh_db: str) -> None:
-        with pytest.raises(ValueError, match="Invalid field name"):
+        with pytest.raises(ValueError, match="Unknown field"):
             upsert_node(fresh_db, "Concept", {"id": "x", "bad field!": "v"})
+
+    def test_unknown_field_raises(self, fresh_db: str) -> None:
+        with pytest.raises(ValueError, match="Unknown field"):
+            upsert_node(fresh_db, "Concept", {"id": "x", "banana": 42})
+
+    def test_embedding_field_rejected(self, fresh_db: str) -> None:
+        with pytest.raises(ValueError, match="Unknown field"):
+            upsert_node(
+                fresh_db, "Concept", {"id": "x", "embedding": [0.1] * 768}
+            )
 
     def test_missing_pk_raises(self, fresh_db: str) -> None:
         with pytest.raises(KeyError):
