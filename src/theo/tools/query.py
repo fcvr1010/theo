@@ -19,10 +19,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import real_ladybug as lb
-
 from theo import get_logger
-from theo._ext import collect_rows, execute
+from theo._ext import run_cypher
 
 _log = get_logger("tools.query")
 
@@ -44,14 +42,7 @@ def query(
         to values.
     """
     _log.info("[QUERY] %s (ro=%s): %s", db_path, read_only, cypher[:120])
-    db = lb.Database(db_path, read_only=read_only)
-    conn = lb.Connection(db)
-    try:
-        rows = collect_rows(execute(conn, cypher))
-    finally:
-        del conn
-        db.close()
-    return rows
+    return run_cypher(db_path, cypher, read_only=read_only)
 
 
 if __name__ == "__main__":
@@ -59,9 +50,13 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 3:
-        print("Usage: python -m theo.tools.query <db_path> '<cypher>'", file=sys.stderr)
+        print(
+            "Usage: python -m theo.tools.query <db_path> '<cypher>' [--rw]",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     db_path = sys.argv[1]
     cypher_query = sys.argv[2]
-    print(json.dumps(query(db_path, cypher_query), indent=2, default=str))
+    rw = "--rw" in sys.argv[3:]
+    print(json.dumps(query(db_path, cypher_query, read_only=not rw), indent=2, default=str))

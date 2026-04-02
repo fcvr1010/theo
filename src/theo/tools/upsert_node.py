@@ -59,14 +59,14 @@ def upsert_node(db_path: str, table: str, properties: dict[str, Any]) -> dict[st
             f"Allowed fields: {sorted(allowed)}"
         )
 
-    # Auto-compute embedding when description or notes are provided.
+    # Auto-compute embedding when description or notes are present in properties
+    # (even if empty -- an empty string should clear the old embedding).
     embedding_computed = False
-    has_text_fields = any(properties.get(f) for f in _EMBEDDING_TEXT_FIELDS)
+    has_text_fields = any(f in properties for f in _EMBEDDING_TEXT_FIELDS)
     if has_text_fields:
         embedding = _compute_embedding(properties)
-        if embedding is not None:
-            properties = {**properties, "embedding": embedding}
-            embedding_computed = True
+        properties = {**properties, "embedding": embedding}
+        embedding_computed = True
 
     db = lb.Database(db_path)
     conn = lb.Connection(db)
