@@ -11,11 +11,12 @@ Commands:
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from theo import __version__
 from theo.config import TheoConfig
@@ -24,7 +25,6 @@ from theo.repo_manager import (
     RepoEntry,
     RepoManager,
     RepoNotFoundError,
-    slug_from_url,
 )
 from theo.tools.get_coverage import get_coverage
 from theo.tools.init_db import init_db
@@ -53,9 +53,7 @@ def _is_url(target: str) -> bool:
     """Return True if *target* looks like a URL rather than a local path."""
     if "://" in target:
         return True
-    if _SCP_RE.match(target):
-        return True
-    return False
+    return bool(_SCP_RE.match(target))
 
 
 def _cmd_add(
@@ -113,10 +111,8 @@ def _cmd_add(
         manager.clone(entry.slug)
     except GitOperationError as exc:
         # Roll back the tracking entry on clone failure.
-        try:
+        with contextlib.suppress(RepoNotFoundError):
             manager.remove(entry.slug)
-        except RepoNotFoundError:
-            pass
         print(f"Error: clone failed -- {exc}", file=sys.stderr)
         return 1
 
@@ -162,9 +158,7 @@ def _cmd_remove(
     if delete_data:
         # Prompt for confirmation if stdin is a TTY.
         if sys.stdin.isatty():
-            answer = input(
-                f"Delete clone ({entry.clone_path}) and DB ({entry.db_path})? [y/N] "
-            )
+            answer = input(f"Delete clone ({entry.clone_path}) and DB ({entry.db_path})? [y/N] ")
             if answer.strip().lower() != "y":
                 print("Aborted. Data and tracking entry kept.")
                 return 0
@@ -302,7 +296,8 @@ def main(argv: list[str] | None = None, config: TheoConfig | None = None) -> int
     cmd = args[0]
     cmd_args = args[1:]
 
-    handlers: dict[str, Any] = {
+    _CmdHandler = Callable[[list[str], TheoConfig, RepoManager], int]
+    handlers: dict[str, _CmdHandler] = {
         "add": _cmd_add,
         "remove": _cmd_remove,
         "list": _cmd_list,

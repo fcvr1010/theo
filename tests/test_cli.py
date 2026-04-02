@@ -14,7 +14,6 @@ from theo.cli import _is_url, main
 from theo.config import TheoConfig
 from theo.repo_manager import RepoManager, slug_from_url
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────────
 
 
@@ -187,7 +186,10 @@ class TestAddCommand:
         capsys: pytest.CaptureFixture[str],
         config: TheoConfig,
     ) -> None:
-        exit_code = main(["add", "https://github.com/org/repo.git", "--frequency", "abc"], config=config)
+        exit_code = main(
+            ["add", "https://github.com/org/repo.git", "--frequency", "abc"],
+            config=config,
+        )
         assert exit_code == 1
         assert "integer" in capsys.readouterr().err.lower()
 
