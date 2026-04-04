@@ -7,6 +7,9 @@ Commands:
   remove <slug>       Remove a tracked repository
   list                List all monitored repositories
   stats [slug]        Show indexing statistics
+  daemon start        Start the background daemon
+  daemon stop         Stop the background daemon
+  daemon status       Show daemon status
 """
 
 from __future__ import annotations
@@ -40,9 +43,9 @@ Usage:
   theo remove <path-or-slug> [--delete-data]  Remove a watched repository
   theo list                               List monitored repositories
   theo stats [path-or-slug]               Show indexing statistics
-  theo daemon start                       Start the background daemon (stub)
-  theo daemon stop                        Stop the background daemon (stub)
-  theo daemon status                      Show daemon status (stub)
+  theo daemon start [--foreground]        Start the background daemon
+  theo daemon stop                        Stop the background daemon
+  theo daemon status                      Show daemon status
 """
 
 # Regex for SCP-style SSH URLs: git@host:path
@@ -277,6 +280,62 @@ def _cmd_stats(
     return 0
 
 
+def _cmd_daemon(args: list[str]) -> int:
+    """Handle ``theo daemon <start|stop|status>``."""
+    # Lazy imports to avoid pulling in heavy modules for --help / --version.
+    from theo.config import TheoConfig as _TheoConfig
+    from theo.daemon import Daemon, DaemonError
+    from theo.repo_manager import RepoManager as _RepoManager
+
+    if not args:
+        print("Error: 'daemon' requires a subcommand (start|stop|status).", file=sys.stderr)
+        return 1
+
+    sub = args[0]
+    rest = args[1:]
+
+    cfg = _TheoConfig()
+    cfg.ensure_dirs()
+    manager = _RepoManager(cfg)
+    daemon = Daemon(cfg, manager)
+
+    if sub == "start":
+        foreground = "--foreground" in rest
+        try:
+            if foreground:
+                import os
+
+                print(f"Daemon running in foreground (pid={os.getpid()})")
+                daemon.run_foreground()
+            else:
+                daemon.start()
+                print("Daemon started.")
+        except DaemonError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    if sub == "stop":
+        try:
+            daemon.stop()
+            print("Daemon stopped.")
+        except DaemonError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    if sub == "status":
+        st = daemon.status()
+        if st.running:
+            print(f"Daemon is running (pid={st.pid})")
+        else:
+            print("Daemon is not running.")
+        return 0
+
+    print(f"Error: unknown daemon subcommand '{sub}'.", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None, config: TheoConfig | None = None) -> int:
     """CLI entry point. Returns exit code."""
     args = argv if argv is not None else sys.argv[1:]
@@ -308,15 +367,7 @@ def main(argv: list[str] | None = None, config: TheoConfig | None = None) -> int
         return handlers[cmd](cmd_args, cfg, manager)
 
     if cmd == "daemon":
-        if len(cmd_args) < 1:
-            print("Error: 'daemon' requires a subcommand (start|stop|status).", file=sys.stderr)
-            return 1
-        sub = cmd_args[0]
-        if sub in ("start", "stop", "status"):
-            print(f"[stub] Would execute: daemon {sub}")
-            return 0
-        print(f"Error: unknown daemon subcommand '{sub}'.", file=sys.stderr)
-        return 1
+        return _cmd_daemon(cmd_args)
 
     print(f"Error: unknown command '{cmd}'. Run 'theo --help' for usage.", file=sys.stderr)
     return 1
