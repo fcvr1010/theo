@@ -49,8 +49,17 @@ upsert_node("my-graph.db", "SourceFile", {"path": "src/auth.py", "name": "auth.p
 # Add a relationship
 upsert_rel("my-graph.db", "BelongsTo", "SourceFile", "src/auth.py", "Concept", "auth")
 
-# Query the graph
+# Query the graph (read-only, via repo name)
 results = query("my-graph.db", "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) RETURN f.path, c.name")
+```
+
+For direct database path access (e.g. COW copies during write sessions), use `theo.tools.query`:
+
+```python
+from theo.tools.query import query as tools_query
+
+# Accepts a db_path directly; supports optional read_only=False for mutations.
+rows = tools_query("/path/to/cow-copy.db", "MATCH (c:Concept) RETURN c.id")
 ```
 
 ## Running tests

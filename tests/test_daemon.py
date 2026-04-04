@@ -13,7 +13,6 @@ from theo.config import TheoConfig
 from theo.daemon import Daemon, DaemonError, DaemonStatus
 from theo.repo_manager import PullResult, RepoEntry
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
@@ -170,9 +169,8 @@ class TestStart:
 
     def test_start_when_already_running(self, daemon: Daemon) -> None:
         daemon.pid_file.write_text("12345")
-        with patch("theo.daemon.os.kill"):  # process alive
-            with pytest.raises(DaemonError, match="already running"):
-                daemon.start()
+        with patch("theo.daemon.os.kill"), pytest.raises(DaemonError, match="already running"):
+            daemon.start()
 
     @patch("theo.daemon.os.fork")
     def test_start_parent_returns(self, mock_fork: MagicMock, daemon: Daemon) -> None:
@@ -238,11 +236,13 @@ class TestStop:
                 return
             # SIGTERM -- do nothing (process ignores it).
 
-        with patch("theo.daemon.os.kill", side_effect=fake_kill):
-            with patch("theo.daemon.time.monotonic") as mock_mono:
-                # Simulate: start at 0, then always past deadline.
-                mock_mono.side_effect = [0.0, 11.0]
-                daemon.stop()
+        with (
+            patch("theo.daemon.os.kill", side_effect=fake_kill),
+            patch("theo.daemon.time.monotonic") as mock_mono,
+        ):
+            # Simulate: start at 0, then always past deadline.
+            mock_mono.side_effect = [0.0, 11.0]
+            daemon.stop()
 
         assert not daemon.pid_file.exists()
 
@@ -342,9 +342,7 @@ class TestTick:
         manager.pull.assert_called_once()
         manager.update.assert_called_once()
 
-    def test_error_isolation_between_repos(
-        self, daemon: Daemon, manager: MagicMock
-    ) -> None:
+    def test_error_isolation_between_repos(self, daemon: Daemon, manager: MagicMock) -> None:
         """A failure in one repo should not prevent processing of others."""
         entry_a = _make_entry(slug="repo-a", last_run_at=None)
         entry_b = _make_entry(slug="repo-b", last_run_at=None)
@@ -410,6 +408,7 @@ class TestRunForeground:
         original_sigterm = signal.getsignal(signal.SIGTERM)
         original_sigint = signal.getsignal(signal.SIGINT)
         try:
+
             def stop_on_tick() -> None:
                 # PID file should exist while running.
                 assert daemon.pid_file.exists()
@@ -465,9 +464,7 @@ class TestRun:
         assert call_count == 1
 
     @patch("theo.daemon.time.sleep")
-    def test_run_installs_signal_handlers(
-        self, mock_sleep: MagicMock, daemon: Daemon
-    ) -> None:
+    def test_run_installs_signal_handlers(self, mock_sleep: MagicMock, daemon: Daemon) -> None:
         """Verify that run() installs signal handlers for SIGTERM and SIGINT."""
         handlers_during_run: dict[int, object] = {}
 
@@ -490,9 +487,7 @@ class TestRun:
             signal.signal(signal.SIGINT, original_sigint)
 
     @patch("theo.daemon.time.sleep")
-    def test_run_survives_tick_exception(
-        self, mock_sleep: MagicMock, daemon: Daemon
-    ) -> None:
+    def test_run_survives_tick_exception(self, mock_sleep: MagicMock, daemon: Daemon) -> None:
         """If tick() raises, run() should continue to the next iteration."""
         call_count = 0
 

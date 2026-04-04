@@ -17,6 +17,7 @@ Process lifecycle:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import sys
@@ -90,9 +91,7 @@ class Daemon:
         """
         current = self.status()
         if current.running:
-            raise DaemonError(
-                f"Daemon is already running (pid={current.pid})"
-            )
+            raise DaemonError(f"Daemon is already running (pid={current.pid})")
 
         _log.info("Starting daemon (double-fork)")
 
@@ -191,10 +190,8 @@ class Daemon:
 
         # Still alive after timeout -- escalate to SIGKILL.
         _log.warning("Daemon pid=%d did not stop after %ds, sending SIGKILL", pid, _STOP_TIMEOUT)
-        try:
+        with contextlib.suppress(ProcessLookupError):
             os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
 
         self._remove_pid_file()
         _log.info("Daemon pid=%d killed", pid)

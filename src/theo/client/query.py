@@ -11,10 +11,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import real_ladybug as lb
-
 from theo import get_logger
-from theo._ext import collect_rows, execute
+from theo._ext import run_cypher
 from theo.config import resolve_db_path
 
 _log = get_logger("query")
@@ -31,12 +29,7 @@ def query(repo: str, cypher: str) -> list[dict[str, Any]]:
         raise ValueError(f"Only read-only queries are allowed, got: {cypher[:80]}")
     db_path = resolve_db_path(repo)
     _log.info("[READ] Graph query on %s: %s", repo, cypher[:120])
-    db = lb.Database(db_path, read_only=True)
-    conn = lb.Connection(db)
-    rows = collect_rows(execute(conn, cypher))
-    del conn
-    db.close()
-    return rows
+    return run_cypher(db_path, cypher, read_only=True)
 
 
 if __name__ == "__main__":
