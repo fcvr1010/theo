@@ -31,7 +31,7 @@ _log = get_logger("lens_runner")
 _TIMEOUT_FULL = 1800  # 30 minutes for full analysis
 _TIMEOUT_INCREMENTAL = 600  # 10 minutes for incremental analysis
 
-# Truncate changed-files list beyond this count to avoid shell argument limits.
+# Truncate changed-files list beyond this count to keep the message size manageable.
 _MAX_CHANGED_FILES_IN_MESSAGE = 500
 
 
@@ -162,8 +162,10 @@ class LensRunner:
 
         if proc.returncode != 0:
             err_text = stderr.decode(errors="replace").strip()[:500]
-            err_msg: str | None = (
-                f"CLI exited with code {proc.returncode}: {err_text}" if err_text else None
+            err_msg = (
+                f"CLI exited with code {proc.returncode}: {err_text}"
+                if err_text
+                else f"CLI exited with code {proc.returncode}"
             )
             _log.warning(
                 "Lens run failed (exit_code=%d, duration=%.1fs)",

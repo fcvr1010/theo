@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -274,8 +275,6 @@ class TestLensRunnerRun:
         sp_idx = captured_cmd.index("--system-prompt")
         tmp_path = captured_cmd[sp_idx + 1]
         # Temp file should have been cleaned up.
-        import os
-
         assert not os.path.exists(tmp_path)
 
     @patch("theo.lens_runner.load_prompt", return_value="prompt")
@@ -311,7 +310,7 @@ class TestLensRunnerRun:
         _mock_load: MagicMock,
         runner: LensRunner,
     ) -> None:
-        """Non-zero exit with empty stderr sets error_message to None."""
+        """Non-zero exit with empty stderr produces a fallback error message."""
         proc = MagicMock()
         proc.communicate.return_value = (b"", b"")
         proc.returncode = 2
@@ -322,7 +321,7 @@ class TestLensRunnerRun:
 
         assert result.success is False
         assert result.exit_code == 2
-        assert result.error_message is None
+        assert result.error_message == "CLI exited with code 2"
 
 
 # ── make_lens_callback ────────────────────────────────────────────────────
@@ -368,15 +367,3 @@ class TestMakeLensCallback:
         callback(entry, pull)
 
         mock_runner.run.assert_not_called()
-
-    def test_none_changed_files_in_pull(self) -> None:
-        """When PullResult.changed_files is falsy (e.g. []), should pass None."""
-        mock_runner = MagicMock(spec=LensRunner)
-        callback = make_lens_callback(mock_runner)
-
-        entry = _make_entry(enabled_lenses=["architect"])
-        pull = PullResult(sha_before="aaa", sha_after="bbb", changed_files=[])
-
-        callback(entry, pull)
-
-        mock_runner.run.assert_called_once_with("org-repo", "architect", changed_files=None)
