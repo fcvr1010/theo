@@ -15,12 +15,12 @@ import contextlib
 import os
 import signal
 import subprocess
-import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from theo import get_logger
+from theo.cli_adapter import CLIAdapter, adapter_for_config
 from theo.config import TheoConfig
 from theo.lenses import load_prompt
 from theo.repo_manager import PullResult, RepoEntry, RepoManager
@@ -53,9 +53,15 @@ class LensRunner:
         repo_manager: Provides repo lookup and git SHA queries (read-only).
     """
 
-    def __init__(self, config: TheoConfig, repo_manager: RepoManager) -> None:
+    def __init__(
+        self,
+        config: TheoConfig,
+        repo_manager: RepoManager,
+        cli_adapter: CLIAdapter | None = None,
+    ) -> None:
         self._config = config
         self._repo_manager = repo_manager
+        self._cli_adapter = cli_adapter or adapter_for_config(config.cli_command)
 
     def run(
         self,
@@ -88,25 +94,14 @@ class LensRunner:
         message = _build_message(entry, sha, changed_files)
         timeout = _TIMEOUT_INCREMENTAL if changed_files is not None else _TIMEOUT_FULL
 
-        # -- Write prompt to temp file ------------------------------------
-        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".md", prefix=f"theo-{lens_name}-")
+        # -- Build CLI command via adapter -----------------------------------
+        cli_command = self._cli_adapter.build_command(prompt_text, message)
         try:
-            with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                f.write(prompt_text)
-
-            cmd = [
-                self._config.cli_command,
-                "--system-prompt",
-                tmp_path,
-                "--message",
-                message,
-                "--print",
-            ]
-
-            return self._exec(cmd, timeout)
+            return self._exec(cli_command.cmd, timeout)
         finally:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
+            for tmp_path in cli_command.temp_files:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
 
     # -- Private helpers --------------------------------------------------
 

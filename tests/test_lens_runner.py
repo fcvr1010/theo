@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from theo.cli_adapter import CLICommand
 from theo.config import TheoConfig
 from theo.lens_runner import (
     _MAX_CHANGED_FILES_IN_MESSAGE,
@@ -54,11 +55,6 @@ def mock_repo_manager() -> MagicMock:
     mgr.get.return_value = _make_entry()
     mgr.get_current_sha.return_value = "abc123def456"
     return mgr
-
-
-@pytest.fixture()
-def runner(config: TheoConfig, mock_repo_manager: MagicMock) -> LensRunner:
-    return LensRunner(config, mock_repo_manager)
 
 
 # ── LensRunResult ─────────────────────────────────────────────────────────
@@ -125,8 +121,15 @@ class TestLensRunnerRun:
         self,
         mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(
+            cmd=["echo", "--print", "msg"], temp_files=[]
+        )
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         proc = MagicMock()
         proc.communicate.return_value = (b"output text", b"")
         proc.returncode = 0
@@ -140,13 +143,11 @@ class TestLensRunnerRun:
         assert result.duration_seconds >= 0
         assert result.error_message is None
 
-        # Verify subprocess was called with correct args.
-        call_args = mock_popen.call_args
-        cmd = call_args[0][0]
-        assert cmd[0] == "echo"  # config.cli_command
-        assert "--system-prompt" in cmd
-        assert "--message" in cmd
-        assert "--print" in cmd
+        # Adapter was called with prompt and message.
+        mock_adapter.build_command.assert_called_once()
+        call_args = mock_adapter.build_command.call_args
+        assert call_args[0][0] == "You are an architect lens."  # system_prompt
+        assert "org-repo" in call_args[0][1] or "/tmp/repos/org-repo" in call_args[0][1]
 
     @patch("theo.lens_runner.load_prompt", return_value="prompt")
     @patch("theo.lens_runner.subprocess.Popen")
@@ -154,8 +155,13 @@ class TestLensRunnerRun:
         self,
         mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(cmd=["echo", "msg"], temp_files=[])
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         proc = MagicMock()
         proc.communicate.return_value = (b"", b"some error output")
         proc.returncode = 1
@@ -175,8 +181,13 @@ class TestLensRunnerRun:
         self,
         mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(cmd=["echo", "msg"], temp_files=[])
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         proc = MagicMock()
         proc.communicate.side_effect = subprocess.TimeoutExpired(cmd="echo", timeout=600)
         proc.pid = 12345
@@ -196,9 +207,14 @@ class TestLensRunnerRun:
         self,
         mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
         """Full analysis uses 1800s timeout, incremental uses 600s."""
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(cmd=["echo", "msg"], temp_files=[])
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         proc = MagicMock()
         proc.communicate.return_value = (b"", b"")
         proc.returncode = 0
@@ -221,8 +237,13 @@ class TestLensRunnerRun:
         self,
         mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(cmd=["echo", "msg"], temp_files=[])
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         proc = MagicMock()
         proc.communicate.return_value = (b"", b"")
         proc.returncode = 0
@@ -240,52 +261,64 @@ class TestLensRunnerRun:
         self,
         _mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(cmd=["echo", "msg"], temp_files=[])
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         result = runner.run("org-repo", "architect")
 
         assert result.success is False
         assert result.exit_code == -1
         assert "not found" in (result.error_message or "")
 
-    @patch("theo.lens_runner.load_prompt", return_value="prompt")
+    @patch("theo.lens_runner.load_prompt", return_value="the prompt text")
     @patch("theo.lens_runner.subprocess.Popen")
-    def test_temp_file_contains_prompt(
+    def test_temp_files_cleaned_up(
         self,
         mock_popen: MagicMock,
-        mock_load: MagicMock,
-        runner: LensRunner,
+        _mock_load: MagicMock,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
-        """The system prompt temp file is passed to the CLI and cleaned up."""
-        captured_cmd: list[str] = []
+        """Temp files returned by the adapter are cleaned up after execution."""
+        import tempfile
 
-        def capture_popen(cmd: list[str], **kwargs: object) -> MagicMock:
-            captured_cmd.extend(cmd)
-            proc = MagicMock()
-            proc.communicate.return_value = (b"", b"")
-            proc.returncode = 0
-            proc.pid = 12345
-            return proc
+        fd, tmp_path = tempfile.mkstemp(suffix=".md")
+        os.close(fd)
 
-        mock_popen.side_effect = capture_popen
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(
+            cmd=["echo", "msg"], temp_files=[tmp_path]
+        )
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
+        proc = MagicMock()
+        proc.communicate.return_value = (b"", b"")
+        proc.returncode = 0
+        proc.pid = 12345
+        mock_popen.return_value = proc
 
         runner.run("org-repo", "architect")
 
-        # Find the temp file path from command args.
-        sp_idx = captured_cmd.index("--system-prompt")
-        tmp_path = captured_cmd[sp_idx + 1]
         # Temp file should have been cleaned up.
         assert not os.path.exists(tmp_path)
 
     @patch("theo.lens_runner.load_prompt", return_value="prompt")
     @patch("theo.lens_runner.subprocess.Popen")
-    def test_message_includes_repo_info(
+    def test_adapter_receives_message_with_repo_info(
         self,
         mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
         mock_repo_manager: MagicMock,
     ) -> None:
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(cmd=["echo", "msg"], temp_files=[])
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         proc = MagicMock()
         proc.communicate.return_value = (b"", b"")
         proc.returncode = 0
@@ -294,9 +327,8 @@ class TestLensRunnerRun:
 
         runner.run("org-repo", "architect", changed_files=["main.py"])
 
-        call_args = mock_popen.call_args[0][0]
-        msg_idx = call_args.index("--message")
-        message = call_args[msg_idx + 1]
+        call_args = mock_adapter.build_command.call_args
+        message = call_args[0][1]
         assert "/tmp/repos/org-repo" in message
         assert "/tmp/db/org-repo" in message
         assert "abc123def456" in message
@@ -308,9 +340,14 @@ class TestLensRunnerRun:
         self,
         mock_popen: MagicMock,
         _mock_load: MagicMock,
-        runner: LensRunner,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
     ) -> None:
         """Non-zero exit with empty stderr produces a fallback error message."""
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(cmd=["echo", "msg"], temp_files=[])
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
         proc = MagicMock()
         proc.communicate.return_value = (b"", b"")
         proc.returncode = 2
@@ -322,6 +359,48 @@ class TestLensRunnerRun:
         assert result.success is False
         assert result.exit_code == 2
         assert result.error_message == "CLI exited with code 2"
+
+    def test_default_adapter_from_config(
+        self,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
+    ) -> None:
+        """When no adapter is provided, one is resolved from config.cli_command."""
+        # config.cli_command is "echo" which is not a supported adapter.
+        # Override to "claude" to test the auto-resolution path.
+        cfg = TheoConfig(base_dir=config.base_dir, cli_command="claude")
+        runner = LensRunner(cfg, mock_repo_manager)
+        # Should have created a ClaudeCodeAdapter.
+        from theo.cli_adapter import ClaudeCodeAdapter
+
+        assert isinstance(runner._cli_adapter, ClaudeCodeAdapter)
+
+    @patch("theo.lens_runner.load_prompt", return_value="prompt text")
+    @patch("theo.lens_runner.subprocess.Popen")
+    def test_temp_files_cleaned_up_on_error(
+        self,
+        mock_popen: MagicMock,
+        _mock_load: MagicMock,
+        config: TheoConfig,
+        mock_repo_manager: MagicMock,
+    ) -> None:
+        """Temp files are cleaned up even when _exec raises."""
+        import tempfile
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".md")
+        os.close(fd)
+
+        mock_adapter = MagicMock()
+        mock_adapter.build_command.return_value = CLICommand(
+            cmd=["echo", "msg"], temp_files=[tmp_path]
+        )
+        runner = LensRunner(config, mock_repo_manager, cli_adapter=mock_adapter)
+
+        mock_popen.side_effect = FileNotFoundError("boom")
+
+        runner.run("org-repo", "architect")
+
+        assert not os.path.exists(tmp_path)
 
 
 # ── make_lens_callback ────────────────────────────────────────────────────
