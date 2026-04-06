@@ -224,6 +224,8 @@ def make_lens_callback(
             runner.run(
                 entry.slug,
                 lens_name,
+                # Coerce empty list to None so the lens analyses the full repo
+                # rather than skipping analysis due to an empty changeset.
                 changed_files=pull_result.changed_files or None,
             )
 

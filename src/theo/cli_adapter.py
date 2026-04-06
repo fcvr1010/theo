@@ -81,7 +81,7 @@ class ClaudeCodeAdapter:
         allowed_tools: list[str] | None = None,
         dangerously_skip_permissions: bool = False,
     ) -> None:
-        if allowed_tools and dangerously_skip_permissions:
+        if allowed_tools is not None and dangerously_skip_permissions:
             raise ValueError(
                 "Cannot specify both allowed_tools and dangerously_skip_permissions; "
                 "choose one permission strategy."
@@ -113,7 +113,7 @@ class ClaudeCodeAdapter:
         # Permission flags.
         if self._dangerously_skip_permissions:
             cmd.append("--dangerously-skip-permissions")
-        elif self._allowed_tools:
+        elif self._allowed_tools is not None:
             cmd.extend(["--allowedTools", " ".join(self._allowed_tools)])
 
         # Message as trailing positional argument (must be last).
