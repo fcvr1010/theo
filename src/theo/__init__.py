@@ -56,6 +56,6 @@ def get_logger(name: str) -> logging.Logger:
                     parent.setLevel(getattr(logging, level_name, logging.INFO))
                     parent.propagate = False
                     parent.addHandler(handler)
-                _handler_installed = True
+                    _handler_installed = True
 
     return logger
