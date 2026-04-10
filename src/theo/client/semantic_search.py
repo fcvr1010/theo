@@ -1,7 +1,7 @@
 """
 Semantic search over the code-intelligence graph.
 
-    semantic_search(repo, query, table=None, top_k=10, expand=False) -> dict
+    semantic_search(db_path, query, table=None, top_k=10, expand=False) -> dict
 
 query: Natural language question (e.g., "how are messages delivered?")
 table: Optional filter -- "Concept", "SourceFile", or None for all.
@@ -26,7 +26,6 @@ from theo import get_logger
 from theo._embed import embed_query
 from theo._ext import collect_rows, execute, get_next_list, load_vector_ext
 from theo._schema import EMBEDDING_DIM, INDEX_MAP, PK_MAP, TABLES
-from theo.config import resolve_db_path
 
 _log = get_logger("semantic_search")
 
@@ -269,7 +268,7 @@ def _expand_matches(
 
 
 def semantic_search(
-    repo: str,
+    db_path: str,
     query: str,
     table: str | None = None,
     top_k: int = 10,
@@ -278,7 +277,7 @@ def semantic_search(
     """Run semantic search over the code-intelligence graph.
 
     Args:
-        repo: Repository name (resolved internally to a DB path).
+        db_path: Path to the KuzuDB database directory.
         query: Natural language search query.
         table: Optional table filter ("Concept", "SourceFile").
         top_k: Number of results to return.
@@ -290,10 +289,9 @@ def semantic_search(
     if table and table not in TABLES:
         raise ValueError(f"Invalid table: {table!r}. Must be one of {TABLES}")
 
-    db_path = resolve_db_path(repo)
     _log.info(
         '[READ] Semantic search on %s: query="%s" table=%s top_k=%d expand=%s',
-        repo,
+        db_path,
         query[:200],
         table or "all",
         top_k,
@@ -335,16 +333,16 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 3:
         print(
-            "Usage: semantic_search.py <repo> <query> [table] [top_k] [expand]",
+            "Usage: semantic_search.py <db_path> <query> [table] [top_k] [expand]",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    repo_name = sys.argv[1]
+    db_path = sys.argv[1]
     q = sys.argv[2]
     tbl = sys.argv[3] if len(sys.argv) > 3 else None
     k = int(sys.argv[4]) if len(sys.argv) > 4 else 10
     exp = sys.argv[5].lower() in ("true", "1", "yes") if len(sys.argv) > 5 else False
 
-    output = semantic_search(repo_name, q, table=tbl, top_k=k, expand=exp)
+    output = semantic_search(db_path, q, table=tbl, top_k=k, expand=exp)
     print(json.dumps(output, indent=2))

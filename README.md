@@ -2,6 +2,8 @@
 
 Codebase intelligence agent — builds a living knowledge graph of any software repository.
 
+Theo is invoked via a skill file committed to your project. See [skill file setup](https://github.com/fcvr1010/theo/wiki/skill-file-setup) for integration with Claude Code and Cursor.
+
 ## Schema
 
 Theo uses [KuzuDB](https://kuzudb.com/) as its graph database with this schema:
@@ -40,17 +42,17 @@ from theo.tools import init_db, upsert_node, upsert_rel
 from theo.client import query
 
 # Create and initialise a database
-init_db("my-graph.db")
+init_db(".theo/db")
 
 # Add nodes
-upsert_node("my-graph.db", "Concept", {"id": "auth", "name": "Authentication"})
-upsert_node("my-graph.db", "SourceFile", {"path": "src/auth.py", "name": "auth.py"})
+upsert_node(".theo/db", "Concept", {"id": "auth", "name": "Authentication"})
+upsert_node(".theo/db", "SourceFile", {"path": "src/auth.py", "name": "auth.py"})
 
 # Add a relationship
-upsert_rel("my-graph.db", "BelongsTo", "SourceFile", "src/auth.py", "Concept", "auth")
+upsert_rel(".theo/db", "BelongsTo", "SourceFile", "src/auth.py", "Concept", "auth")
 
-# Query the graph (read-only, via repo name)
-results = query("my-graph.db", "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) RETURN f.path, c.name")
+# Query the graph (read-only, first arg is the db path)
+results = query(".theo/db", "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) RETURN f.path, c.name")
 ```
 
 For direct database path access (e.g. COW copies during write sessions), use `theo.tools.query`:

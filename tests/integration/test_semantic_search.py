@@ -9,22 +9,20 @@ import pytest
 class TestSemanticSearch:
     """Integration tests for semantic search."""
 
-    def test_search_empty_db(self, fresh_repo: str) -> None:
+    def test_search_empty_db(self, fresh_db: str) -> None:
         from theo.client.semantic_search import semantic_search
 
-        result = semantic_search(fresh_repo, "test query")
+        result = semantic_search(fresh_db, "test query")
         assert result["matches"] == []
 
-    def test_search_returns_matches(self, populated_repo: str) -> None:
+    def test_search_returns_matches(self, populated_db: str) -> None:
         import real_ladybug as lb
 
         from theo._embed import embed_text
         from theo.client.semantic_search import semantic_search
-        from theo.config import resolve_db_path
 
         # Add embeddings to nodes first.
-        db_path = resolve_db_path(populated_repo)
-        db = lb.Database(db_path)
+        db = lb.Database(populated_db)
         conn = lb.Connection(db)
 
         vecs = embed_text(
@@ -47,7 +45,7 @@ class TestSemanticSearch:
         db.close()
 
         result = semantic_search(
-            populated_repo,
+            populated_db,
             "how does message dispatching work?",
             top_k=3,
         )
@@ -55,15 +53,13 @@ class TestSemanticSearch:
         # dispatch should be the top match.
         assert result["matches"][0]["id"] == "dispatch"
 
-    def test_search_with_table_filter(self, populated_repo: str) -> None:
+    def test_search_with_table_filter(self, populated_db: str) -> None:
         import real_ladybug as lb
 
         from theo._embed import embed_text
         from theo.client.semantic_search import semantic_search
-        from theo.config import resolve_db_path
 
-        db_path = resolve_db_path(populated_repo)
-        db = lb.Database(db_path)
+        db = lb.Database(populated_db)
         conn = lb.Connection(db)
         vecs = embed_text(["Dispatcher implementation", "Delivery pipeline"])
         for path, vec in zip(
@@ -79,15 +75,15 @@ class TestSemanticSearch:
         db.close()
 
         result = semantic_search(
-            populated_repo,
+            populated_db,
             "dispatcher",
             table="SourceFile",
             top_k=5,
         )
         assert all(m["table"] == "SourceFile" for m in result["matches"])
 
-    def test_search_invalid_table_raises(self, fresh_repo: str) -> None:
+    def test_search_invalid_table_raises(self, fresh_db: str) -> None:
         from theo.client.semantic_search import semantic_search
 
         with pytest.raises(ValueError, match="Invalid table"):
-            semantic_search(fresh_repo, "test", table="NonExistent")
+            semantic_search(fresh_db, "test", table="NonExistent")
