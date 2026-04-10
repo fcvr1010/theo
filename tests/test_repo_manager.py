@@ -217,25 +217,15 @@ class TestAdd:
     """Test adding repositories."""
 
     def test_add_basic(self, manager: RepoManager, config: TheoConfig) -> None:
-        entry = manager.add("https://github.com/org/my-repo.git", frequency_minutes=60)
+        entry = manager.add("https://github.com/org/my-repo.git")
         assert isinstance(entry, RepoEntry)
         assert entry.url == "https://github.com/org/my-repo.git"
         assert entry.slug == "org-my-repo"
-        assert entry.frequency_minutes == 60
         assert entry.clone_path == str(config.base_dir / "repos" / "org-my-repo")
         assert entry.db_path == str(config.base_dir / "db" / "org-my-repo")
         assert entry.last_checked_revision is None
         assert entry.last_run_at is None
-        assert entry.enabled_lenses == []
         assert entry.added_at  # non-empty ISO string
-
-    def test_add_uses_default_frequency(self, manager: RepoManager) -> None:
-        entry = manager.add("https://github.com/org/repo")
-        assert entry.frequency_minutes == 30  # TheoConfig default
-
-    def test_add_with_lenses(self, manager: RepoManager) -> None:
-        entry = manager.add("https://github.com/org/repo", enabled_lenses=["structure", "docs"])
-        assert entry.enabled_lenses == ["structure", "docs"]
 
     def test_add_persists_to_disk(self, manager: RepoManager) -> None:
         manager.add("https://github.com/org/repo.git")
@@ -324,27 +314,14 @@ class TestGet:
 class TestUpdate:
     """Test updating repository fields."""
 
-    def test_update_frequency(self, manager: RepoManager) -> None:
-        manager.add("https://github.com/org/repo.git")
-        updated = manager.update("org-repo", frequency_minutes=120)
-        assert updated.frequency_minutes == 120
-        # Verify persistence.
-        reloaded = manager.get("org-repo")
-        assert reloaded.frequency_minutes == 120
-
     def test_update_last_checked_revision(self, manager: RepoManager) -> None:
         manager.add("https://github.com/org/repo.git")
         updated = manager.update("org-repo", last_checked_revision="abc123")
         assert updated.last_checked_revision == "abc123"
 
-    def test_update_enabled_lenses(self, manager: RepoManager) -> None:
-        manager.add("https://github.com/org/repo.git")
-        updated = manager.update("org-repo", enabled_lenses=["structure"])
-        assert updated.enabled_lenses == ["structure"]
-
     def test_update_nonexistent_raises(self, manager: RepoManager) -> None:
         with pytest.raises(RepoNotFoundError, match="not found"):
-            manager.update("nonexistent", frequency_minutes=60)
+            manager.update("nonexistent", last_checked_revision="abc123")
 
     def test_update_unknown_field_raises(self, manager: RepoManager) -> None:
         manager.add("https://github.com/org/repo.git")
@@ -374,7 +351,7 @@ class TestClone:
     """Test cloning repositories."""
 
     def test_clone_success(self, manager: RepoManager, bare_repo: str, config: TheoConfig) -> None:
-        manager.add(bare_repo, frequency_minutes=10)
+        manager.add(bare_repo)
         slug = slug_from_url(bare_repo)
         clone_dir = manager.clone(slug)
         assert clone_dir.exists()
@@ -498,10 +475,8 @@ class TestRepoEntry:
             slug="org-repo",
             clone_path="/tmp/repos/org-repo",
             db_path="/tmp/db/org-repo",
-            frequency_minutes=30,
             last_checked_revision=None,
             last_run_at=None,
-            enabled_lenses=["structure"],
             added_at="2026-01-01T00:00:00+00:00",
         )
         from dataclasses import asdict
@@ -517,10 +492,8 @@ class TestRepoEntry:
             "slug": "org-repo",
             "clone_path": "/tmp/repos/org-repo",
             "db_path": "/tmp/db/org-repo",
-            "frequency_minutes": 30,
             "last_checked_revision": None,
             "last_run_at": None,
-            "enabled_lenses": [],
             "added_at": "2026-01-01T00:00:00+00:00",
             # Extra keys from a hypothetical future version.
             "new_future_field": "some-value",

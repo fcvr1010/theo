@@ -24,21 +24,6 @@ class TestTheoConfig:
             config = TheoConfig()
             assert config.base_dir == tmp_path / "custom"
 
-    def test_default_frequency(self) -> None:
-        config = TheoConfig()
-        assert config.default_frequency_minutes == 30
-
-    def test_default_cli_command(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("THEO_CLI_COMMAND", None)
-            config = TheoConfig()
-            assert config.cli_command == "claude"
-
-    def test_cli_command_from_env(self) -> None:
-        with patch.dict(os.environ, {"THEO_CLI_COMMAND": "custom-cli"}):
-            config = TheoConfig()
-            assert config.cli_command == "custom-cli"
-
     def test_ensure_dirs_creates_base(self, tmp_path: Path) -> None:
         base = tmp_path / "new_base"
         config = TheoConfig(base_dir=base)
@@ -54,10 +39,6 @@ class TestTheoConfig:
         config.ensure_dirs()
         config.ensure_dirs()  # Should not raise.
         assert base.exists()
-
-    def test_custom_frequency(self) -> None:
-        config = TheoConfig(default_frequency_minutes=60)
-        assert config.default_frequency_minutes == 60
 
     def test_explicit_base_dir_overrides_env(self, tmp_path: Path) -> None:
         explicit = tmp_path / "explicit"

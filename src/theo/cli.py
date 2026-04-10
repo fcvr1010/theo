@@ -7,9 +7,6 @@ Commands:
   remove <slug>       Remove a tracked repository
   list                List all monitored repositories
   stats [slug]        Show indexing statistics
-  daemon start        Start the background daemon
-  daemon stop         Stop the background daemon
-  daemon status       Show daemon status
 """
 
 from __future__ import annotations
@@ -39,13 +36,10 @@ theo {__version__} -- codebase intelligence agent
 Usage:
   theo --version                          Show version
   theo --help                             Show this help
-  theo add <url-or-path> [--frequency N]  Add a repository (URL or local path)
+  theo add <url-or-path>                  Add a repository (URL or local path)
   theo remove <path-or-slug> [--delete-data]  Remove a watched repository
   theo list                               List monitored repositories
   theo stats [path-or-slug]               Show indexing statistics
-  theo daemon start [--foreground]        Start the background daemon
-  theo daemon stop                        Stop the background daemon
-  theo daemon status                      Show daemon status
 """
 
 # Regex for SCP-style SSH URLs: git@host:path
@@ -64,7 +58,7 @@ def _cmd_add(
     config: TheoConfig,
     manager: RepoManager,
 ) -> int:
-    """Handle ``theo add <url-or-path> [--frequency N]``."""
+    """Handle ``theo add <url-or-path>``."""
     if not args:
         print("Error: 'add' requires a URL or path argument.", file=sys.stderr)
         return 1
@@ -72,26 +66,9 @@ def _cmd_add(
     target = args[0]
     rest = args[1:]
 
-    # Parse --frequency flag.
-    frequency: int | None = None
-    i = 0
-    while i < len(rest):
-        if rest[i] == "--frequency":
-            if i + 1 >= len(rest):
-                print("Error: --frequency requires a value.", file=sys.stderr)
-                return 1
-            try:
-                frequency = int(rest[i + 1])
-            except ValueError:
-                print(
-                    f"Error: --frequency requires an integer, got '{rest[i + 1]}'.",
-                    file=sys.stderr,
-                )
-                return 1
-            i += 2
-        else:
-            print(f"Error: unknown option '{rest[i]}'.", file=sys.stderr)
-            return 1
+    if rest:
+        print(f"Error: unknown option '{rest[0]}'.", file=sys.stderr)
+        return 1
 
     # Determine URL vs local path.
     if _is_url(target):
@@ -104,7 +81,7 @@ def _cmd_add(
         url = f"file://{resolved}"
 
     try:
-        entry = manager.add(url, frequency_minutes=frequency)
+        entry = manager.add(url)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -230,7 +207,6 @@ def _print_entry_stats(entry: RepoEntry) -> None:
     print(f"    URL:       {entry.url}")
     print(f"    Clone:     {entry.clone_path}")
     print(f"    DB:        {entry.db_path}")
-    print(f"    Frequency: every {entry.frequency_minutes} min")
     print(f"    Last SHA:  {entry.last_checked_revision or 'none'}")
     print(f"    Last run:  {entry.last_run_at or 'never'}")
 
@@ -280,62 +256,6 @@ def _cmd_stats(
     return 0
 
 
-def _cmd_daemon(args: list[str]) -> int:
-    """Handle ``theo daemon <start|stop|status>``."""
-    # Lazy imports to avoid pulling in heavy modules for --help / --version.
-    from theo.config import TheoConfig as _TheoConfig
-    from theo.daemon import Daemon, DaemonError
-    from theo.repo_manager import RepoManager as _RepoManager
-
-    if not args:
-        print("Error: 'daemon' requires a subcommand (start|stop|status).", file=sys.stderr)
-        return 1
-
-    sub = args[0]
-    rest = args[1:]
-
-    cfg = _TheoConfig()
-    cfg.ensure_dirs()
-    manager = _RepoManager(cfg)
-    daemon = Daemon(cfg, manager)
-
-    if sub == "start":
-        foreground = "--foreground" in rest
-        try:
-            if foreground:
-                import os
-
-                print(f"Daemon running in foreground (pid={os.getpid()})")
-                daemon.run_foreground()
-            else:
-                daemon.start()
-                print("Daemon started.")
-        except DaemonError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
-        return 0
-
-    if sub == "stop":
-        try:
-            daemon.stop()
-            print("Daemon stopped.")
-        except DaemonError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            return 1
-        return 0
-
-    if sub == "status":
-        st = daemon.status()
-        if st.running:
-            print(f"Daemon is running (pid={st.pid})")
-        else:
-            print("Daemon is not running.")
-        return 0
-
-    print(f"Error: unknown daemon subcommand '{sub}'.", file=sys.stderr)
-    return 1
-
-
 def main(argv: list[str] | None = None, config: TheoConfig | None = None) -> int:
     """CLI entry point. Returns exit code."""
     args = argv if argv is not None else sys.argv[1:]
@@ -365,9 +285,6 @@ def main(argv: list[str] | None = None, config: TheoConfig | None = None) -> int
 
     if cmd in handlers:
         return handlers[cmd](cmd_args, cfg, manager)
-
-    if cmd == "daemon":
-        return _cmd_daemon(cmd_args)
 
     print(f"Error: unknown command '{cmd}'. Run 'theo --help' for usage.", file=sys.stderr)
     return 1

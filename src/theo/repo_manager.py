@@ -40,10 +40,8 @@ class RepoEntry:
     slug: str
     clone_path: str
     db_path: str
-    frequency_minutes: int
     last_checked_revision: str | None
     last_run_at: str | None
-    enabled_lenses: list[str]
     added_at: str
 
     @classmethod
@@ -170,18 +168,11 @@ class RepoManager:
 
     # ── CRUD operations ───────────────────────────────────────────────────
 
-    def add(
-        self,
-        url: str,
-        frequency_minutes: int | None = None,
-        enabled_lenses: list[str] | None = None,
-    ) -> RepoEntry:
+    def add(self, url: str) -> RepoEntry:
         """Register a new repository for tracking.
 
         Args:
             url: Git clone URL (HTTPS or SSH).
-            frequency_minutes: Polling interval. Defaults to config default.
-            enabled_lenses: List of lens names to enable. Defaults to empty.
 
         Returns:
             The newly created ``RepoEntry``.
@@ -190,11 +181,6 @@ class RepoManager:
             ValueError: If a repository with the same URL or slug is already registered.
         """
         slug = slug_from_url(url)
-        freq = (
-            frequency_minutes
-            if frequency_minutes is not None
-            else self._config.default_frequency_minutes
-        )
 
         entries = self._load()
 
@@ -216,10 +202,8 @@ class RepoManager:
             slug=slug,
             clone_path=clone_path,
             db_path=db_path,
-            frequency_minutes=freq,
             last_checked_revision=None,
             last_run_at=None,
-            enabled_lenses=enabled_lenses or [],
             added_at=datetime.now(UTC).isoformat(),
         )
 
@@ -280,7 +264,7 @@ class RepoManager:
 
         Args:
             slug: The repository slug.
-            **fields: Fields to update (e.g. ``frequency_minutes=60``).
+            **fields: Fields to update (e.g. ``last_checked_revision="abc123"``).
 
         Returns:
             The updated ``RepoEntry``.
