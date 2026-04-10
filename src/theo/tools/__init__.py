@@ -1,6 +1,6 @@
 """Theo internal tools -- write and operational tools for the knowledge graph.
 
-These tools are used exclusively by Theo's lenses and daemon.
+These tools are used exclusively by Theo's lenses.
 Consumers should use ``theo.client`` for read-only access.
 """
 
