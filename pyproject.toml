@@ -10,10 +10,17 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = [
     "real-ladybug>=0.15.0,<=0.15.2",
-    "fastembed>=0.7.0,<=0.8.0",
+    "mcp>=1.0.0,<2.0.0",
+    "typer>=0.10.0,<1.0.0",
 ]
 
+[project.scripts]
+theo = "theo.cli.main:app"
+
 [project.optional-dependencies]
+semantic = [
+    "fastembed>=0.7.0,<=0.8.0",
+]
 dev = [
     "pytest>=9.0.0,<=9.0.2",
     "pytest-cov>=7.1.0,<=7.1.0",
@@ -24,6 +31,7 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/theo"]
+include = ["src/theo/skills/theo/*.md"]
 
 [tool.ruff]
 target-version = "py311"
@@ -44,4 +52,5 @@ mypy_path = "src"
 testpaths = ["tests"]
 markers = [
     "integration: marks tests requiring real DB and ML model (deselect with '-m not integration')",
+    "e2e: end-to-end tests that invoke Theo via subprocess",
 ]
