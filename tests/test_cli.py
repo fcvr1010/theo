@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,9 +16,8 @@ class TestVersion:
     """theo --version prints the version string."""
 
     def test_version_flag(self, capsys: pytest.CaptureFixture[str]) -> None:
-        with pytest.raises(SystemExit, match="0"):
-            with patch("sys.argv", ["theo", "--version"]):
-                main()
+        with pytest.raises(SystemExit, match="0"), patch("sys.argv", ["theo", "--version"]):
+            main()
         captured = capsys.readouterr()
         assert f"theo {__version__}" in captured.out
 
@@ -63,9 +60,7 @@ class TestInit:
         out = capsys.readouterr().out
         assert "already initialised" in out
 
-    def test_init_defaults_to_cwd(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_init_defaults_to_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.chdir(tmp_path)
         with patch("sys.argv", ["theo", "init"]):
             rc = main()

@@ -1,7 +1,7 @@
 """Theo project state — tracks indexing progress in ``.theo/state.json``.
 
-    load_state(config) -> TheoState
-    save_state(config, state) -> None
+load_state(config) -> TheoState
+save_state(config, state) -> None
 """
 
 from __future__ import annotations
@@ -43,9 +43,7 @@ def save_state(config: TheoConfig, state: TheoState) -> None:
     payload = json.dumps(asdict(state), indent=2) + "\n"
 
     # Atomic write: write to a temp file in the same directory, then rename.
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(config.theo_dir), prefix=".state-", suffix=".tmp"
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(config.theo_dir), prefix=".state-", suffix=".tmp")
     try:
         # Close the fd from mkstemp first, then write via Path.
         os.close(fd)
