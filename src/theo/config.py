@@ -71,6 +71,8 @@ def resolve_db_path(repo: str) -> str:
 
     Convention: ``{base_dir}/db/{repo}``.
 
+    Migration target: ``TheoConfig(project_dir=Path.cwd()).db_path``
+
     .. deprecated::
         Use ``TheoConfig.db_path`` for project-local access instead.
     """

@@ -33,7 +33,7 @@ uv sync
 uv sync --extra dev
 ```
 
-## Quick start
+## Python API Quick Start
 
 ```python
 from theo.tools import init_db, upsert_node, upsert_rel
@@ -52,6 +52,17 @@ upsert_rel("my-graph.db", "BelongsTo", "SourceFile", "src/auth.py", "Concept", "
 # Query the graph (read-only, via repo name)
 results = query("my-graph.db", "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) RETURN f.path, c.name")
 ```
+
+## CLI Quick Start
+
+```bash
+pip install theo
+cd /path/to/your/project
+theo init
+theo stats
+```
+
+See the [skill file setup guide](https://github.com/fcvr1010/theo) to integrate Theo into Claude Code or Cursor.
 
 For direct database path access (e.g. COW copies during write sessions), use `theo.tools.query`:
 

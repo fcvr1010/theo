@@ -17,7 +17,12 @@ from theo.config import TheoConfig
 
 @dataclass
 class TheoState:
-    """Serialisable state for a Theo project."""
+    """Serialisable state for a Theo project.
+
+    last_indexed_commit is sufficient for freshness detection at commit
+    granularity. File-level staleness is tracked in the graph itself via the
+    git_revision property on each SourceFile node.
+    """
 
     project: str
     last_indexed_commit: str | None = None

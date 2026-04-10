@@ -9,6 +9,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -22,6 +23,14 @@ def _cmd_init(args: argparse.Namespace) -> int:
     from theo.tools.init_db import init_db
 
     project_dir = Path(args.path).resolve()
+
+    if not project_dir.exists():
+        print(f"Error: path does not exist: {project_dir}", file=sys.stderr)
+        return 1
+    if not project_dir.is_dir():
+        print(f"Error: path is not a directory: {project_dir}", file=sys.stderr)
+        return 1
+
     config = TheoConfig(project_dir=project_dir)
 
     # Idempotent: if already initialised, say so and exit cleanly.
@@ -60,6 +69,17 @@ def _cmd_stats(args: argparse.Namespace) -> int:
     counts = get_node_counts(config.db_path)
     cov = get_coverage(config.db_path, str(project_dir))
 
+    if args.json:
+        output = {
+            "project": state.project,
+            "last_indexed_commit": state.last_indexed_commit,
+            "last_indexed_at": state.last_indexed_at,
+            "node_counts": counts,
+            "coverage_pct": cov["coverage_pct"],
+        }
+        print(json.dumps(output, indent=2))
+        return 0
+
     total_nodes = counts["concepts"] + counts["source_files"]
     if state.last_indexed_commit and state.last_indexed_at:
         last_indexed = f"{state.last_indexed_commit} at {state.last_indexed_at}"
@@ -90,7 +110,10 @@ def main() -> int:
     init_parser.add_argument("path", nargs="?", default=".", help="Project directory (default: .)")
 
     # theo stats
-    subparsers.add_parser("stats", help="Show graph statistics for the current project")
+    stats_parser = subparsers.add_parser(
+        "stats", help="Show graph statistics for the current project"
+    )
+    stats_parser.add_argument("--json", action="store_true", default=False, help="Output as JSON")
 
     args = parser.parse_args()
 

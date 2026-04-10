@@ -67,6 +67,22 @@ class TestInit:
         assert rc == 0
         assert (tmp_path / ".theo").is_dir()
 
+    def test_init_nonexistent_path(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with patch("sys.argv", ["theo", "init", "/nonexistent/path"]):
+            rc = main()
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "does not exist" in err
+
+    def test_init_file_path(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        a_file = tmp_path / "somefile.txt"
+        a_file.write_text("hello")
+        with patch("sys.argv", ["theo", "init", str(a_file)]):
+            rc = main()
+        assert rc == 1
+        err = capsys.readouterr().err
+        assert "not a directory" in err
+
 
 class TestStats:
     """theo stats shows project information."""
@@ -97,3 +113,21 @@ class TestStats:
         assert "Last indexed:     never" in out
         assert "Nodes:" in out
         assert "Coverage:" in out
+
+    def test_stats_json(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with patch("sys.argv", ["theo", "init", str(tmp_path)]):
+            main()
+        capsys.readouterr()  # discard init output
+
+        monkeypatch.chdir(tmp_path)
+        with patch("sys.argv", ["theo", "stats", "--json"]):
+            rc = main()
+        assert rc == 0
+        data = json.loads(capsys.readouterr().out)
+        assert data["project"] == tmp_path.name
+        assert "last_indexed_commit" in data
+        assert "last_indexed_at" in data
+        assert "node_counts" in data
+        assert isinstance(data["coverage_pct"], int | float)
