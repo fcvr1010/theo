@@ -1,8 +1,8 @@
 """Theo configuration.
 
-    TheoConfig(base_dir, default_frequency_minutes, cli_command, embedding_model, embedding_dim)
+    TheoConfig(base_dir, embedding_model, embedding_dim)
 
-Supports env var overrides: ``THEO_BASE_DIR``, ``THEO_CLI_COMMAND``,
+Supports env var overrides: ``THEO_BASE_DIR``,
 ``THEO_EMBEDDING_MODEL``, ``THEO_EMBEDDING_DIM``.
 """
 
@@ -20,10 +20,6 @@ def _default_base_dir() -> Path:
     return Path.home() / ".theo"
 
 
-def _default_cli_command() -> str:
-    return os.environ.get("THEO_CLI_COMMAND", "claude")
-
-
 def _default_embedding_model() -> str:
     return os.environ.get("THEO_EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 
@@ -37,8 +33,6 @@ class TheoConfig:
     """Runtime configuration for Theo."""
 
     base_dir: Path = field(default_factory=_default_base_dir)
-    default_frequency_minutes: int = 30
-    cli_command: str = field(default_factory=_default_cli_command)
     embedding_model: str = field(default_factory=_default_embedding_model)
     embedding_dim: int = field(default_factory=_default_embedding_dim)
 

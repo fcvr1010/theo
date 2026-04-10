@@ -156,7 +156,7 @@ Create `BelongsTo` edges to the most specific concept. Create `Imports` edges fo
 
 ### Step 6. Cross-cutting Concerns
 
-After building the local picture, identify high-level architectural interactions between systems and subsystems. Create `InteractsWith` edges to capture how major components collaborate (e.g., "the dispatcher routes messages to specialist agents", "the CLI invokes the daemon via subprocess"). Create `DependsOn` edges only for **architectural-level** dependencies between systems (e.g., "the lens system depends on the tool system for graph writes"). Do not trace fine-grained runtime dependencies or import chains -- that is the Dependency-Master's job.
+After building the local picture, identify high-level architectural interactions between systems and subsystems. Create `InteractsWith` edges to capture how major components collaborate (e.g., "the dispatcher routes messages to specialist agents"). Create `DependsOn` edges only for **architectural-level** dependencies between systems (e.g., "the lens system depends on the tool system for graph writes"). Do not trace fine-grained runtime dependencies or import chains -- that is the Dependency-Master's job.
 
 ### Step 7. Update State
 
