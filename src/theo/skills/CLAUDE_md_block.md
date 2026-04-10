@@ -26,13 +26,16 @@ python -m theo.tools.init_db .theo/db
 ### 2. Check freshness
 
 ```bash
-git rev-parse HEAD
 python -m theo.tools.get_coverage .theo/db .
+# Interpret output:
+# - "indexed": 0  → graph is empty, run full Architect Lens
+# - "stale": [..] → those files changed since last index, run incremental re-indexing
+# - "stale": []   → graph is fresh, query it before coding
 ```
 
-Compare the `last_revision` from `get_coverage` output to the current HEAD.
-- If they match: the graph is fresh. **Query it before coding.**
-- If they differ or the graph is empty: **run the Architect Lens** (see "Indexing" below) on the changed files before coding.
+- If `indexed` is 0: the graph is empty. **Run the full Architect Lens** (see "Indexing" below).
+- If `stale` is non-empty: those files need re-indexing. **Run incremental re-indexing** on the listed files before coding.
+- If `stale` is empty: the graph is fresh. **Query it before coding.**
 
 ### 3. Query before coding
 
@@ -90,8 +93,7 @@ python -m theo.tools.upsert_rel $COW_PATH PartOf Concept child-id Concept parent
 # 3. Validate, then commit atomically:
 python -m theo.tools.commit_write $COW_PATH .theo/db
 
-# 4. Rebuild indexes and embeddings:
-python -m theo.tools.manage_indexes .theo/db
+# 4. Backfill embeddings (commit_write already rebuilds vector indexes):
 python -m theo.tools.backfill_embeddings .theo/db
 ```
 
@@ -132,6 +134,8 @@ Use this SHA in every node you write.
   "git_revision": "<HEAD_SHA>"
 }
 ```
+
+The `embedding` field is managed internally by `backfill_embeddings` -- do not include it in `upsert_node` calls.
 
 **Relationships:**
 - `PartOf`: Concept -> Concept (hierarchy: child PartOf parent)
@@ -242,7 +246,14 @@ After building the local picture, identify high-level architectural interactions
 
 ### Step 7. Update state
 
-Run `get_coverage` and report your progress.
+Run `get_coverage` on the COW path and report your progress.
+
+### Step 8. Validate and commit
+
+Run the 5 structural validation queries (see "Structural validation before commit" below) against `$COW_PATH`. All queries must return empty results.
+
+- **If all checks pass:** run `commit_write`, then `backfill_embeddings`, then report final coverage via `get_coverage`.
+- **If any check fails:** fix the violations and re-validate. If the violations cannot be resolved, abort the COW session without committing (simply discard the `$COW_PATH` directory).
 
 ## Quality bar for `notes` fields
 

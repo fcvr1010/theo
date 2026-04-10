@@ -15,9 +15,11 @@ Check freshness:
 
 ```bash
 python -m theo.tools.get_coverage .theo/db .
+# Interpret output:
+# - "indexed": 0  → graph is empty, run full indexing
+# - "stale": [..] → those files changed since last index, re-index them
+# - "stale": []   → graph is fresh, query it before coding
 ```
-
-If `last_revision` matches `git rev-parse HEAD`, the graph is up to date.
 
 ## Querying
 

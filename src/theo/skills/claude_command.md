@@ -15,13 +15,16 @@ python -m theo.tools.init_db .theo/db
 ### 2. Check freshness
 
 ```bash
-HEAD_SHA=$(git rev-parse HEAD)
-echo "HEAD: $HEAD_SHA"
 python -m theo.tools.get_coverage .theo/db .
+# Interpret output:
+# - "indexed": 0  → graph is empty, run the indexing workflow
+# - "stale": [..] → those files changed since last index, run incremental re-indexing
+# - "stale": []   → graph is fresh, proceed to querying
 ```
 
-- If `last_revision` matches HEAD: the graph is fresh -- proceed to querying.
-- If they differ or the graph is empty: run the indexing workflow (see below).
+- If `indexed` is 0: the graph is empty -- run the indexing workflow (see below).
+- If `stale` is non-empty: those files need re-indexing -- run incremental re-indexing.
+- If `stale` is empty: the graph is fresh -- proceed to querying.
 
 ### 3. Query or index
 
@@ -38,7 +41,6 @@ python -m theo.tools.get_coverage .theo/db .
 | List subsystems | `python -m theo.tools.query .theo/db "MATCH (n:Concept) WHERE n.kind IN ['system','subsystem'] RETURN n.name, n.kind, n.level, n.description ORDER BY n.level, n.name"` |
 | Files in component | `python -m theo.tools.query .theo/db "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept {name: '<Name>'}) RETURN f.path, f.description ORDER BY f.path"` |
 | Component notes | `python -m theo.tools.query .theo/db "MATCH (n:Concept {name: '<Name>'}) RETURN n.notes"` |
-| Interactions | `python -m theo.tools.query .theo/db "MATCH (a:Concept)-[r:InteractsWith\|DependsOn]->(b:Concept) RETURN a.name, type(r), b.name, r.description"` |
 | Init DB | `python -m theo.tools.init_db .theo/db` |
 | Begin COW write | `COW_PATH=$(python -m theo.tools.begin_write .theo/db)` |
 | Upsert node | `python -m theo.tools.upsert_node $COW_PATH <Table> '<json>'` |
@@ -47,6 +49,11 @@ python -m theo.tools.get_coverage .theo/db .
 | Rebuild indexes | `python -m theo.tools.manage_indexes .theo/db` |
 | Backfill embeddings | `python -m theo.tools.backfill_embeddings .theo/db` |
 | Coverage stats | `python -m theo.tools.get_coverage .theo/db .` |
+
+**Interactions query** (separated from the table because the Cypher pipe operator breaks Markdown table syntax):
+```bash
+python -m theo.tools.query .theo/db "MATCH (a:Concept)-[r:InteractsWith|DependsOn]->(b:Concept) RETURN a.name, type(r), b.name, r.description"
+```
 
 ## COW write workflow (for indexing)
 
@@ -62,8 +69,7 @@ python -m theo.tools.upsert_node $COW_PATH Concept '{"id": "my-concept", "name":
 # 3. Validate (run integrity checks), then commit
 python -m theo.tools.commit_write $COW_PATH .theo/db
 
-# 4. Rebuild indexes and embeddings
-python -m theo.tools.manage_indexes .theo/db
+# 4. Backfill embeddings (commit_write already rebuilds vector indexes)
 python -m theo.tools.backfill_embeddings .theo/db
 ```
 
