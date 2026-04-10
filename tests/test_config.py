@@ -12,39 +12,39 @@ from theo.config import TheoConfig
 class TestTheoConfig:
     """Test configuration defaults and env var overrides."""
 
-    def test_default_base_dir(self) -> None:
-        with patch.dict(os.environ, {}, clear=True):
-            # Remove THEO_BASE_DIR if present.
-            os.environ.pop("THEO_BASE_DIR", None)
-            config = TheoConfig()
-            assert config.base_dir == Path.home() / ".theo"
+    def test_default_project_dir(self) -> None:
+        config = TheoConfig()
+        assert config.project_dir == Path.cwd()
 
-    def test_base_dir_from_env(self, tmp_path: Path) -> None:
-        with patch.dict(os.environ, {"THEO_BASE_DIR": str(tmp_path / "custom")}):
-            config = TheoConfig()
-            assert config.base_dir == tmp_path / "custom"
+    def test_explicit_project_dir(self, tmp_path: Path) -> None:
+        config = TheoConfig(project_dir=tmp_path / "my-project")
+        assert config.project_dir == tmp_path / "my-project"
 
-    def test_ensure_dirs_creates_base(self, tmp_path: Path) -> None:
-        base = tmp_path / "new_base"
-        config = TheoConfig(base_dir=base)
+    def test_theo_dir(self, tmp_path: Path) -> None:
+        config = TheoConfig(project_dir=tmp_path)
+        assert config.theo_dir == tmp_path / ".theo"
+
+    def test_db_path(self, tmp_path: Path) -> None:
+        config = TheoConfig(project_dir=tmp_path)
+        assert config.db_path == str(tmp_path / ".theo" / "db")
+
+    def test_state_file(self, tmp_path: Path) -> None:
+        config = TheoConfig(project_dir=tmp_path)
+        assert config.state_file == tmp_path / ".theo" / "state.json"
+
+    def test_ensure_dirs_creates_theo_dir(self, tmp_path: Path) -> None:
+        project = tmp_path / "new_project"
+        project.mkdir()
+        config = TheoConfig(project_dir=project)
         config.ensure_dirs()
-        assert base.exists()
-        assert (base / "logs").exists()
-        assert (base / "db").exists()
-        assert (base / "repos").exists()
+        assert config.theo_dir.exists()
+        assert (config.theo_dir / "logs").exists()
 
     def test_ensure_dirs_idempotent(self, tmp_path: Path) -> None:
-        base = tmp_path / "idempotent"
-        config = TheoConfig(base_dir=base)
+        config = TheoConfig(project_dir=tmp_path)
         config.ensure_dirs()
         config.ensure_dirs()  # Should not raise.
-        assert base.exists()
-
-    def test_explicit_base_dir_overrides_env(self, tmp_path: Path) -> None:
-        explicit = tmp_path / "explicit"
-        with patch.dict(os.environ, {"THEO_BASE_DIR": str(tmp_path / "env")}):
-            config = TheoConfig(base_dir=explicit)
-            assert config.base_dir == explicit
+        assert config.theo_dir.exists()
 
     def test_default_embedding_model(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
@@ -68,18 +68,9 @@ class TestTheoConfig:
             config = TheoConfig()
             assert config.embedding_dim == 384
 
-    def test_db_path_for_repo(self, tmp_path: Path) -> None:
-        config = TheoConfig(base_dir=tmp_path)
-        assert config.db_path_for_repo("my-repo") == str(tmp_path / "db" / "my-repo")
 
-    def test_db_path_for_repo_rejects_slashes(self, tmp_path: Path) -> None:
-        import pytest
-
-        config = TheoConfig(base_dir=tmp_path)
-        with pytest.raises(ValueError, match="path separators"):
-            config.db_path_for_repo("foo/bar")
-        with pytest.raises(ValueError, match="path separators"):
-            config.db_path_for_repo("foo\\bar")
+class TestResolveDbPath:
+    """Test backward-compatible resolve_db_path helper."""
 
     def test_resolve_db_path(self, tmp_path: Path) -> None:
         from theo.config import resolve_db_path
@@ -87,3 +78,13 @@ class TestTheoConfig:
         with patch.dict(os.environ, {"THEO_BASE_DIR": str(tmp_path)}):
             result = resolve_db_path("test-repo")
             assert result == str(tmp_path / "db" / "test-repo")
+
+    def test_resolve_db_path_rejects_slashes(self) -> None:
+        import pytest
+
+        from theo.config import resolve_db_path
+
+        with pytest.raises(ValueError, match="path separators"):
+            resolve_db_path("foo/bar")
+        with pytest.raises(ValueError, match="path separators"):
+            resolve_db_path("foo\\bar")
