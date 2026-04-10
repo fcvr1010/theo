@@ -25,6 +25,24 @@ All node tables include an `embedding FLOAT[768]` column for semantic search
 (powered by [nomic-embed-text-v1.5](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5)
 via [fastembed](https://github.com/qdrant/fastembed)).
 
+## Skill file setup
+
+Theo ships with ready-made skill files that teach your coding agent how to use the knowledge graph. Pick the integration that matches your editor:
+
+### Claude Code (recommended)
+
+1. `pip install theo` (or `uv add theo`)
+2. Copy the contents of `src/theo/skills/CLAUDE_md_block.md` into your project's `CLAUDE.md`
+3. Start Claude Code -- it handles the rest (initialisation, freshness checks, querying)
+
+### Claude Code slash command
+
+Copy `src/theo/skills/claude_command.md` to `.claude/commands/theo.md` in your project. This gives you a `/theo` command you can invoke explicitly to query or update the graph.
+
+### Cursor
+
+Paste the contents of `src/theo/skills/cursor_rules.md` into your project's `.cursorrules` file.
+
 ## Installation
 
 ```bash

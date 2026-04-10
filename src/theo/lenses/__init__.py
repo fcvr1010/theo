@@ -8,6 +8,13 @@ nodes with their relationships).
 
 Reads ``<lens_name>_prompt.md`` from this package directory and returns the raw
 text.  Raises ``FileNotFoundError`` if no prompt file exists for the given lens.
+
+.. note::
+    For the primary integration model (Claude Code, Cursor, etc.), the skill
+    files in ``src/theo/skills/`` supersede this function -- they embed the lens
+    content directly so the coding agent is self-contained.  ``load_prompt()``
+    remains available for programmatic use (e.g. custom toolchains or CI
+    pipelines that need to load a lens prompt at runtime).
 """
 
 from __future__ import annotations
