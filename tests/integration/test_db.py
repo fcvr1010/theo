@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from theo._db import (
+    delete_edge,
+    delete_node,
     export_csv,
     get_stats,
     rebuild_from_csv,
@@ -173,6 +175,110 @@ class TestUpsertEdge:
     def test_unknown_rel_type(self, tmp_db: Path) -> None:
         result = upsert_edge(tmp_db, "Bogus", "a", "b", git_revision="abc123")
         assert result["status"] == "error"
+
+
+class TestDeleteNode:
+    def test_deletes_isolated_node(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "Concept", {"id": "gone"})
+        result = delete_node(tmp_db, "Concept", "gone")
+        assert result["status"] == "ok"
+        rows = run_query(tmp_db, "MATCH (n:Concept {id: 'gone'}) RETURN count(n) AS c")
+        assert rows[0]["c"] == 0
+
+    def test_deletes_source_file(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "SourceFile", {"path": "src/old.py"})
+        result = delete_node(tmp_db, "SourceFile", "src/old.py")
+        assert result["status"] == "ok"
+        rows = run_query(tmp_db, "MATCH (n:SourceFile {path: 'src/old.py'}) RETURN count(n) AS c")
+        assert rows[0]["c"] == 0
+
+    def test_rejects_unknown_table(self, tmp_db: Path) -> None:
+        result = delete_node(tmp_db, "Bogus", "x")
+        assert result["status"] == "error"
+
+    def test_rejects_missing_node(self, tmp_db: Path) -> None:
+        result = delete_node(tmp_db, "Concept", "nope")
+        assert result["status"] == "error"
+        assert "not found" in result["detail"]
+
+    def test_refuses_concept_with_child_concepts(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "Concept", {"id": "parent"})
+        upsert_node(tmp_db, "Concept", {"id": "child"})
+        upsert_edge(tmp_db, "PartOf", "child", "parent", git_revision="r1")
+        result = delete_node(tmp_db, "Concept", "parent", detach=True)
+        assert result["status"] == "error"
+        assert "child Concept" in result["detail"]
+
+    def test_refuses_concept_with_source_files(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "Concept", {"id": "owner"})
+        upsert_node(tmp_db, "SourceFile", {"path": "f.py"})
+        upsert_edge(tmp_db, "BelongsTo", "f.py", "owner", git_revision="r1")
+        result = delete_node(tmp_db, "Concept", "owner", detach=True)
+        assert result["status"] == "error"
+        assert "SourceFile" in result["detail"]
+
+    def test_refuses_node_with_edges_without_detach(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "SourceFile", {"path": "a.py"})
+        upsert_node(tmp_db, "SourceFile", {"path": "b.py"})
+        upsert_edge(tmp_db, "Imports", "a.py", "b.py", git_revision="r1")
+        result = delete_node(tmp_db, "SourceFile", "a.py")
+        assert result["status"] == "error"
+        assert "detach" in result["detail"]
+
+    def test_detach_drops_incident_edges(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "SourceFile", {"path": "a.py"})
+        upsert_node(tmp_db, "SourceFile", {"path": "b.py"})
+        upsert_edge(tmp_db, "Imports", "a.py", "b.py", git_revision="r1")
+        result = delete_node(tmp_db, "SourceFile", "a.py", detach=True)
+        assert result["status"] == "ok"
+        rows = run_query(tmp_db, "MATCH ()-[r:Imports]->() RETURN count(r) AS c")
+        assert rows[0]["c"] == 0
+        rows = run_query(tmp_db, "MATCH (n:SourceFile {path: 'b.py'}) RETURN count(n) AS c")
+        assert rows[0]["c"] == 1
+
+    def test_concept_deletion_after_reparent(self, tmp_db: Path) -> None:
+        """Typical refactor flow: re-parent children, then drop the old Concept."""
+        upsert_node(tmp_db, "Concept", {"id": "root"})
+        upsert_node(tmp_db, "Concept", {"id": "old"})
+        upsert_node(tmp_db, "Concept", {"id": "child"})
+        upsert_edge(tmp_db, "PartOf", "old", "root", git_revision="r1")
+        upsert_edge(tmp_db, "PartOf", "child", "old", git_revision="r1")
+
+        # Re-parent child under root, remove the old link, then delete.
+        upsert_edge(tmp_db, "PartOf", "child", "root", git_revision="r2")
+        assert delete_edge(tmp_db, "PartOf", "child", "old")["status"] == "ok"
+        result = delete_node(tmp_db, "Concept", "old", detach=True)
+        assert result["status"] == "ok"
+
+
+class TestDeleteEdge:
+    def test_deletes_existing_edge(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "Concept", {"id": "a"})
+        upsert_node(tmp_db, "Concept", {"id": "b"})
+        upsert_edge(tmp_db, "PartOf", "a", "b", git_revision="r1")
+        result = delete_edge(tmp_db, "PartOf", "a", "b")
+        assert result["status"] == "ok"
+        rows = run_query(tmp_db, "MATCH ()-[r:PartOf]->() RETURN count(r) AS c")
+        assert rows[0]["c"] == 0
+
+    def test_leaves_endpoints_intact(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "Concept", {"id": "a"})
+        upsert_node(tmp_db, "Concept", {"id": "b"})
+        upsert_edge(tmp_db, "PartOf", "a", "b", git_revision="r1")
+        delete_edge(tmp_db, "PartOf", "a", "b")
+        rows = run_query(tmp_db, "MATCH (n:Concept) RETURN count(n) AS c")
+        assert rows[0]["c"] == 2
+
+    def test_rejects_unknown_rel_type(self, tmp_db: Path) -> None:
+        result = delete_edge(tmp_db, "Bogus", "a", "b")
+        assert result["status"] == "error"
+
+    def test_rejects_missing_edge(self, tmp_db: Path) -> None:
+        upsert_node(tmp_db, "Concept", {"id": "a"})
+        upsert_node(tmp_db, "Concept", {"id": "b"})
+        result = delete_edge(tmp_db, "PartOf", "a", "b")
+        assert result["status"] == "error"
+        assert "not found" in result["detail"]
 
 
 class TestExportAndRebuild:
