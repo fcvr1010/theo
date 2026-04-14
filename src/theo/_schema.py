@@ -20,7 +20,6 @@ CONCEPT_FIELDS: set[str] = {
     "id",
     "name",
     "level",
-    "kind",
     "description",
     "notes",
     "git_revision",
@@ -73,7 +72,6 @@ CONCEPT_COLUMNS: list[str] = [
     "id",
     "name",
     "level",
-    "kind",
     "description",
     "notes",
     "git_revision",
@@ -98,7 +96,6 @@ NODE_DDL: dict[str, str] = {
         "id STRING PRIMARY KEY, "
         "name STRING, "
         "level INT32, "
-        "kind STRING, "
         "description STRING, "
         "notes STRING, "
         "git_revision STRING)"

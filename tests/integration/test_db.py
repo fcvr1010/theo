@@ -39,13 +39,13 @@ class TestUpsertNode:
             {
                 "id": "auth",
                 "name": "Auth System",
-                "kind": "subsystem",
+                "level": 1,
             },
         )
         assert result["status"] == "ok"
-        rows = run_query(tmp_db, "MATCH (n:Concept {id: 'auth'}) RETURN n.name, n.kind")
+        rows = run_query(tmp_db, "MATCH (n:Concept {id: 'auth'}) RETURN n.name, n.level")
         assert rows[0]["n.name"] == "Auth System"
-        assert rows[0]["n.kind"] == "subsystem"
+        assert rows[0]["n.level"] == 1
 
     def test_upsert_source_file(self, tmp_db: Path) -> None:
         result = upsert_node(

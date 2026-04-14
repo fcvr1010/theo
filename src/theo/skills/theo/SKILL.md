@@ -26,7 +26,7 @@ Additional relationships include `InteractsWith` and `DependsOn` indicating, res
 
 Finally `Imports` models code imports.
 
-`Concept` has the following attributes: `id`, `name`, `level`, `kind`, `description`, `notes`, and `git_revision`. `level` is used when defining hierarchies of concepts, for example "docker compose strategy" as part of "infrastructure". `kind` instead defines the type of concept, for example "system", "protocol", "service".
+`Concept` has the following attributes: `id`, `name`, `level`, `description`, `notes`, and `git_revision`. `level` is used when defining hierarchies of concepts: the root `Concept` is at level `0`, its direct children are level `1`, and so on. `level` together with the `PartOf` relationship is what shapes the conceptual hierarchy of the codebase.
 
 `SourceFile` has the following attributes: `path`, `name`, `description`, `notes`, `git_revision`.
 
@@ -64,7 +64,7 @@ theo_upsert_node(table: str, properties: dict) -> dict
 
 Create or update a node. `table` is `"Concept"` or `"SourceFile"`.
 
-**Concept fields**: `id`, `name`, `level` (int), `kind`, `description`, `notes`, `git_revision`
+**Concept fields**: `id`, `name`, `level` (int), `description`, `notes`, `git_revision`
 **SourceFile fields**: `path`, `name`, `description`, `notes`, `git_revision`
 
 ## `theo_upsert_edge`
@@ -153,6 +153,8 @@ Follow the "Updating/building the graph" procedure starting from the changeset.
 There shall be a root `Concept` node named after the repository. All other nodes shall have a parent.
 
 No circular relationships.
+
+No `Concept` at level X can be the child (`PartOf` relationship) of a `Concept` at a level >= X.
 
 ## CSV commit instructions
 
