@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 
 from theo._schema import CSV_FILES
@@ -136,3 +137,81 @@ def test_updates_theo_entry_on_rerun(tmp_path: Path) -> None:
     mcp2 = json.loads((tmp_path / ".mcp.json").read_text())
     assert "theo" in mcp2["mcpServers"]
     assert mcp2["mcpServers"]["theo"]["type"] == "stdio"
+
+
+def test_creates_codex_config_toml(tmp_path: Path) -> None:
+    run(str(tmp_path))
+    config_path = tmp_path / ".codex" / "config.toml"
+    assert config_path.exists()
+    parsed = tomllib.loads(config_path.read_text())
+    server = parsed["mcp_servers"]["theo"]
+    assert "command" in server
+    assert "serve" in server["args"]
+    assert str(tmp_path) in server["args"]
+
+
+def test_preserves_existing_codex_config(tmp_path: Path) -> None:
+    """Re-running ``theo use`` preserves unrelated content in ``.codex/config.toml``."""
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    existing = (
+        "# user comment\n"
+        'model = "gpt-5"\n'
+        "\n"
+        "[mcp_servers.other]\n"
+        'command = "other"\n'
+        'args = ["--foo"]\n'
+    )
+    (codex_dir / "config.toml").write_text(existing)
+
+    run(str(tmp_path))
+
+    content = (codex_dir / "config.toml").read_text()
+    assert "# user comment" in content
+    parsed = tomllib.loads(content)
+    assert parsed["model"] == "gpt-5"
+    assert parsed["mcp_servers"]["other"]["command"] == "other"
+    assert parsed["mcp_servers"]["other"]["args"] == ["--foo"]
+    assert "theo" in parsed["mcp_servers"]
+    assert "serve" in parsed["mcp_servers"]["theo"]["args"]
+
+
+def test_codex_config_idempotent(tmp_path: Path) -> None:
+    """Re-running ``theo use`` does not duplicate the theo MCP entry."""
+    run(str(tmp_path))
+    first = (tmp_path / ".codex" / "config.toml").read_text()
+    run(str(tmp_path))
+    second = (tmp_path / ".codex" / "config.toml").read_text()
+
+    # Only one [mcp_servers.theo] header present
+    assert second.count("[mcp_servers.theo]") == 1
+    # TOML content is parseable and the theo entry is intact
+    parsed = tomllib.loads(second)
+    assert "theo" in parsed["mcp_servers"]
+    assert first.count("[mcp_servers.theo]") == 1
+
+
+def test_codex_config_replaces_stale_theo_entry(tmp_path: Path) -> None:
+    """A stale ``[mcp_servers.theo]`` entry is replaced, not duplicated."""
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    stale = (
+        "[mcp_servers.theo]\n"
+        'command = "/old/path/to/theo"\n'
+        'args = ["serve", "/old/project"]\n'
+        "\n"
+        "[mcp_servers.theo.env]\n"
+        'FOO = "bar"\n'
+    )
+    (codex_dir / "config.toml").write_text(stale)
+
+    run(str(tmp_path))
+
+    content = (codex_dir / "config.toml").read_text()
+    assert content.count("[mcp_servers.theo]") == 1
+    assert "/old/path/to/theo" not in content
+    assert "/old/project" not in content
+    # Stale subtable is removed too
+    assert "[mcp_servers.theo.env]" not in content
+    parsed = tomllib.loads(content)
+    assert str(tmp_path) in parsed["mcp_servers"]["theo"]["args"]

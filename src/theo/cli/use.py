@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.resources
 import json
+import re
 import shutil
 import sys
 from datetime import UTC, datetime
@@ -30,6 +31,66 @@ def _find_theo_executable() -> list[str]:
     if exe:
         return [exe]
     return [sys.executable, "-m", "theo.cli.main"]
+
+
+def _toml_quote(s: str) -> str:
+    """Encode *s* as a TOML basic string."""
+    escaped = s.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _build_codex_theo_block(theo_cmd: list[str], project_dir_str: str) -> str:
+    """Return the ``[mcp_servers.theo]`` TOML block for Codex config."""
+    if len(theo_cmd) == 1:
+        command = theo_cmd[0]
+        args = ["serve", project_dir_str]
+    else:
+        command = theo_cmd[0]
+        args = [*theo_cmd[1:], "serve", project_dir_str]
+    args_str = ", ".join(_toml_quote(a) for a in args)
+    return f"[mcp_servers.theo]\ncommand = {_toml_quote(command)}\nargs = [{args_str}]\n"
+
+
+def _strip_codex_theo_section(content: str) -> str:
+    """Remove any existing ``[mcp_servers.theo]`` (and subtables) from *content*.
+
+    Text-based surgery so we don't disturb comments or formatting of unrelated
+    sections in the user's config.
+    """
+    header_re = re.compile(r"^\s*\[([^\[\]]+)\]\s*$")
+    out: list[str] = []
+    skipping = False
+    for line in content.splitlines(keepends=True):
+        m = header_re.match(line)
+        if m:
+            section = m.group(1).strip()
+            if section == "mcp_servers.theo" or section.startswith("mcp_servers.theo."):
+                skipping = True
+                continue
+            skipping = False
+        if not skipping:
+            out.append(line)
+    return "".join(out)
+
+
+def _update_codex_mcp_config(project_dir: Path, theo_cmd: list[str], project_dir_str: str) -> None:
+    """Register Theo's MCP server in ``.codex/config.toml``.
+
+    See https://developers.openai.com/codex/mcp for the expected TOML schema.
+    Preserves any pre-existing configuration in the file.
+    """
+    codex_dir = project_dir / ".codex"
+    codex_dir.mkdir(exist_ok=True)
+    config_path = codex_dir / "config.toml"
+    theo_block = _build_codex_theo_block(theo_cmd, project_dir_str)
+
+    if config_path.exists():
+        cleaned = _strip_codex_theo_section(config_path.read_text()).rstrip()
+        new_content = cleaned + "\n\n" + theo_block if cleaned else theo_block
+    else:
+        new_content = theo_block
+
+    config_path.write_text(new_content)
 
 
 def run(project_dir_str: str) -> None:
@@ -105,6 +166,9 @@ def run(project_dir_str: str) -> None:
     else:
         mcp_config = {"mcpServers": {"theo": theo_server}}
         mcp_json_path.write_text(json.dumps(mcp_config, indent=2) + "\n")
+
+    # Register MCP server in .codex/config.toml (Codex CLI / IDE extension)
+    _update_codex_mcp_config(project_dir, theo_cmd, project_dir_str)
 
     # Write skill files to .claude/skills/theo/
     claude_dir = project_dir / ".claude"
