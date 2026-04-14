@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
 import pytest
@@ -33,7 +33,6 @@ def theo_project(tmp_path: Path) -> Path:
             "id": "core",
             "name": "Core",
             "level": 0,
-            "kind": "system",
             "description": "The core system",
             "notes": None,
             "git_revision": "abc123",
@@ -46,8 +45,19 @@ def theo_project(tmp_path: Path) -> Path:
             "id": "parser",
             "name": "Parser",
             "level": 1,
-            "kind": "component",
             "description": "Parses input files",
+            "notes": None,
+            "git_revision": "abc123",
+        },
+    )
+    upsert_node(
+        db_path,
+        "Concept",
+        {
+            "id": "deep",
+            "name": "Deep",
+            "level": 4,
+            "description": "Something nested several layers down",
             "notes": None,
             "git_revision": "abc123",
         },
@@ -132,6 +142,65 @@ def test_build_graph_contains_correct_legend(theo_project: Path) -> None:
     # Should NOT have language-specific legend items
     assert "Python file" not in html
     assert "Markdown file" not in html
+
+
+def test_level_tier_mapping() -> None:
+    """_level_tier collapses any level >= 3 into the L3+ bucket."""
+    from theo.cli.ui import _level_tier
+
+    assert _level_tier(0) == "L0"
+    assert _level_tier(1) == "L1"
+    assert _level_tier(2) == "L2"
+    assert _level_tier(3) == "L3+"
+    assert _level_tier(7) == "L3+"
+    assert _level_tier(None) == "L3+"
+
+
+def _extract_nodes(html: str) -> list[dict[str, Any]]:
+    """Pull the embedded vis.js nodesData JSON out of the rendered HTML."""
+    marker = "const nodesData = "
+    start = html.index(marker) + len(marker)
+    depth = 0
+    end = start
+    for i, ch in enumerate(html[start:], start=start):
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                end = i + 1
+                break
+    return cast(list[dict[str, Any]], json.loads(html[start:end]))
+
+
+def test_build_graph_concept_nodes_use_level_tier(theo_project: Path) -> None:
+    """Concept nodes should be styled by their level tier (L0/L1/L2/L3+)."""
+    from theo.cli.ui import _build_graph
+
+    db_path = theo_project / ".theo" / "db" / "theo.db"
+    html = _build_graph(db_path, "test-project")
+
+    nodes = {n["id"]: n for n in _extract_nodes(html) if n["id"].startswith("c:")}
+
+    # L0 (Core): largest red node
+    assert nodes["c:core"]["_tier"] == "L0"
+    assert nodes["c:core"]["color"]["background"] == "#FF6B6B"
+    assert nodes["c:core"]["size"] == 45
+
+    # L1 (Parser): orange
+    assert nodes["c:parser"]["_tier"] == "L1"
+    assert nodes["c:parser"]["color"]["background"] == "#FFA94D"
+    assert nodes["c:parser"]["size"] == 32
+
+    # L4 → collapsed into L3+
+    assert nodes["c:deep"]["_tier"] == "L3+"
+    assert nodes["c:deep"]["color"]["background"] == "#A0A8B0"
+    assert nodes["c:deep"]["size"] == 18
+
+    # No legacy `_kind` or `kind` attribute leaks into the rendered nodes.
+    for n in nodes.values():
+        assert "_kind" not in n
+        assert "kind" not in n
 
 
 def test_build_graph_file_nodes_use_unified_color(theo_project: Path) -> None:

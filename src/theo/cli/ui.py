@@ -25,23 +25,40 @@ from theo._git import find_theo_root
 
 # ── Color palette ────────────────────────────────────────────────────────────
 
+# Concepts are styled by their `level` in the PartOf hierarchy.
+# L0 is the top-most layer; L3+ collapses everything deeper into one tier.
 CONCEPT_COLORS: dict[str, dict[str, Any]] = {
-    "system": {
+    "L0": {
         "background": "#FF6B6B",
         "border": "#E05555",
         "highlight": {"background": "#FF8A8A", "border": "#FF6B6B"},
     },
-    "subsystem": {
+    "L1": {
         "background": "#FFA94D",
         "border": "#E89040",
         "highlight": {"background": "#FFC07A", "border": "#FFA94D"},
     },
-    "component": {
+    "L2": {
         "background": "#FFD93D",
         "border": "#E0C030",
         "highlight": {"background": "#FFE56A", "border": "#FFD93D"},
     },
+    "L3+": {
+        "background": "#A0A8B0",
+        "border": "#7E868F",
+        "highlight": {"background": "#BDC4CC", "border": "#A0A8B0"},
+    },
 }
+
+
+def _level_tier(level: int | None) -> str:
+    """Map a numeric level to a UI tier label (L0, L1, L2, L3+)."""
+    if level is None or level >= 3:
+        return "L3+"
+    if level <= 0:
+        return "L0"
+    return f"L{level}"
+
 
 FILE_COLOR: dict[str, Any] = {
     "background": "#C7CEEA",
@@ -98,7 +115,7 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         conn,
         """
         MATCH (c:Concept)
-        RETURN c.id AS id, c.name AS name, c.level AS level, c.kind AS kind,
+        RETURN c.id AS id, c.name AS name, c.level AS level,
                c.description AS description, c.notes AS notes
         ORDER BY c.level, c.name
         """,
@@ -140,17 +157,18 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
 
-    size_map = {"system": 45, "subsystem": 32, "component": 24}
+    size_map = {"L0": 45, "L1": 32, "L2": 24, "L3+": 18}
     inspector_map: dict[str, str] = {}
 
     for c in concepts:
-        kind = c["kind"]
-        colors = CONCEPT_COLORS.get(kind, CONCEPT_COLORS["component"])
+        level = c["level"]
+        tier = _level_tier(level)
+        colors = CONCEPT_COLORS[tier]
         nid = f"c:{c['id']}"
 
         tip_parts = [
             f'<div class="insp-header">{_esc_html(c["name"])}</div>',
-            f'<div class="insp-badge insp-badge-{kind}">{kind} &middot; L{c["level"]}</div>',
+            f'<div class="insp-badge insp-badge-{tier.replace("+", "plus")}">{tier}</div>',
         ]
         if c["description"]:
             tip_parts.append(
@@ -169,17 +187,17 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
                 "id": nid,
                 "label": c["name"],
                 "color": colors,
-                "size": size_map.get(kind, 20),
+                "size": size_map[tier],
                 "shape": "dot",
                 "font": {
-                    "size": 16 if kind == "system" else 13,
+                    "size": 16 if tier == "L0" else 13,
                     "color": "white",
                     "strokeWidth": 3,
                     "strokeColor": "#111",
                 },
-                "mass": 3 if kind == "system" else 2,
-                "_kind": kind,
-                "_level": c["level"],
+                "mass": 3 if tier == "L0" else 2,
+                "_tier": tier,
+                "_level": level,
             }
         )
 
@@ -504,9 +522,10 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
     padding: 2px 8px; border-radius: 4px; margin-bottom: 8px;
     text-transform: uppercase; letter-spacing: 0.5px;
   }}
-  .insp-badge-system {{ background: rgba(255,107,107,0.25); color: #FF6B6B; }}
-  .insp-badge-subsystem {{ background: rgba(255,169,77,0.25); color: #FFA94D; }}
-  .insp-badge-component {{ background: rgba(255,217,61,0.25); color: #FFD93D; }}
+  .insp-badge-L0 {{ background: rgba(255,107,107,0.25); color: #FF6B6B; }}
+  .insp-badge-L1 {{ background: rgba(255,169,77,0.25); color: #FFA94D; }}
+  .insp-badge-L2 {{ background: rgba(255,217,61,0.25); color: #FFD93D; }}
+  .insp-badge-L3plus {{ background: rgba(160,168,176,0.25); color: #A0A8B0; }}
   .insp-meta {{
     font-size: 11px; color: #999; margin-bottom: 8px;
     font-family: "SF Mono", "Fira Code", monospace;
@@ -529,18 +548,22 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
 <div id="legend">
   <h3>Theo Graph</h3>
 
-  <div class="legend-section">Nodes</div>
+  <div class="legend-section">Concepts (by level)</div>
   <div class="legend-item">
     <svg class="legend-swatch" width="16" height="16"><circle cx="8" cy="8" r="7" fill="#FF6B6B" stroke="#E05555" stroke-width="1.5"/></svg>
-    <span>System (top-level)</span>
+    <span>L0 (top-level)</span>
   </div>
   <div class="legend-item">
     <svg class="legend-swatch" width="14" height="14"><circle cx="7" cy="7" r="6" fill="#FFA94D" stroke="#E89040" stroke-width="1.5"/></svg>
-    <span>Subsystem</span>
+    <span>L1</span>
   </div>
   <div class="legend-item">
     <svg class="legend-swatch" width="12" height="12"><circle cx="6" cy="6" r="5" fill="#FFD93D" stroke="#E0C030" stroke-width="1.5"/></svg>
-    <span>Component</span>
+    <span>L2</span>
+  </div>
+  <div class="legend-item">
+    <svg class="legend-swatch" width="10" height="10"><circle cx="5" cy="5" r="4" fill="#A0A8B0" stroke="#7E868F" stroke-width="1.5"/></svg>
+    <span>L3+</span>
   </div>
   <div class="legend-item">
     <svg class="legend-swatch" width="12" height="12"><rect x="1" y="1" width="10" height="10" rx="2" fill="#C7CEEA" stroke="#A8B2D8" stroke-width="1"/></svg>
@@ -617,7 +640,7 @@ const inspectorData = {inspector_json};
 
 nodesData.forEach(n => {{
   n._isFile = n.id.startsWith("f:");
-  if (!n._kind) n._kind = null;
+  if (!n._tier) n._tier = null;
   // Save original colors for focus+context restore
   n._origColor = JSON.parse(JSON.stringify(n.color));
   n._origFontColor = n.font ? n.font.color : "#ccc";
@@ -1047,11 +1070,12 @@ function applyFilters() {{
     let hidden = false;
     if (n._isFile) {{
       hidden = !showFiles;
-    }} else if (n._level !== undefined && n._level !== null) {{
-      if (n._level === 0) hidden = !showL0;
-      else if (n._level === 1) hidden = !showL1;
-      else if (n._level === 2) hidden = !showL2;
-      else hidden = !showL3plus;
+    }} else {{
+      const lvl = n._level;
+      if (lvl === 0) hidden = !showL0;
+      else if (lvl === 1) hidden = !showL1;
+      else if (lvl === 2) hidden = !showL2;
+      else hidden = !showL3plus;  // 3+ or null/undefined
     }}
     if (hidden) hiddenNodes.add(n.id);
     return {{ id: n.id, hidden }};
