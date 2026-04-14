@@ -1,7 +1,7 @@
 """``theo serve`` -- MCP server with stdio transport.
 
-Exposes four tools: ``theo_stats``, ``theo_query``, ``theo_upsert_node``,
-and ``theo_upsert_edge``.
+Exposes six tools: ``theo_stats``, ``theo_query``, ``theo_upsert_node``,
+``theo_upsert_edge``, ``theo_delete_node``, and ``theo_delete_edge``.
 """
 
 from __future__ import annotations
@@ -14,7 +14,16 @@ from typing import Any
 import typer
 
 from theo._cow import abort_write, begin_write, commit_write
-from theo._db import export_csv, get_stats, rebuild_from_csv, run_query, upsert_edge, upsert_node
+from theo._db import (
+    delete_edge,
+    delete_node,
+    export_csv,
+    get_stats,
+    rebuild_from_csv,
+    run_query,
+    upsert_edge,
+    upsert_node,
+)
 from theo._git import find_theo_root, head_commit
 from theo._schema import NODE_TABLES, PK_MAP, REL_TABLES
 
@@ -162,6 +171,65 @@ def handle_theo_upsert_edge(
         return {"status": "error", "detail": str(exc)}
 
 
+def handle_theo_delete_node(
+    db_path: Path,
+    csv_dir: Path,
+    table: str,
+    id: str,
+    *,
+    detach: bool = False,
+) -> dict[str, Any]:
+    """Delete a node (COW -> export CSV)."""
+    if table not in NODE_TABLES:
+        return {
+            "status": "error",
+            "detail": f"Invalid table: {table}. Must be one of {NODE_TABLES}",
+        }
+
+    tmp_path = begin_write(db_path)
+    try:
+        result = delete_node(tmp_path, table, id, detach=detach)
+        if result["status"] == "error":
+            abort_write(tmp_path)
+            return result
+        commit_write(tmp_path, db_path)
+        export_csv(db_path, csv_dir)
+        return result
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            abort_write(tmp_path)
+        return {"status": "error", "detail": str(exc)}
+
+
+def handle_theo_delete_edge(
+    db_path: Path,
+    csv_dir: Path,
+    rel_type: str,
+    from_id: str,
+    to_id: str,
+) -> dict[str, Any]:
+    """Delete a relationship (COW -> export CSV)."""
+    if rel_type not in REL_TABLES:
+        return {
+            "status": "error",
+            "detail": f"Invalid relationship type: {rel_type}. Must be one of {REL_TABLES}",
+        }
+
+    tmp_path = begin_write(db_path)
+    try:
+        result = delete_edge(tmp_path, rel_type, from_id, to_id)
+        if result["status"] == "error":
+            abort_write(tmp_path)
+            return result
+        commit_write(tmp_path, db_path)
+        export_csv(db_path, csv_dir)
+        return result
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            abort_write(tmp_path)
+        return {"status": "error", "detail": str(exc)}
+
+
 # ---------------------------------------------------------------------------
 # MCP server setup
 # ---------------------------------------------------------------------------
@@ -234,5 +302,32 @@ def run(project_dir_str: str) -> None:
             description,
             git_revision=git_revision,
         )
+
+    @mcp.tool()
+    def theo_delete_node(table: str, id: str, detach: bool = False) -> dict[str, Any]:
+        """Delete a node from the knowledge graph.
+
+        Uses copy-on-write for safe mutation and exports CSVs after each write.
+        ``table`` must be one of: Concept, SourceFile. ``id`` is the primary
+        key value (``id`` for Concept, ``path`` for SourceFile).
+
+        Refuses if the node is a Concept that still has child Concepts (via
+        PartOf) or owning SourceFiles (via BelongsTo) -- re-parent first.
+
+        Refuses if the node has other incident edges unless ``detach=True`` is
+        passed; with ``detach=True`` all incident edges are dropped together
+        with the node.
+        """
+        return handle_theo_delete_node(db_path, csv_dir, table, id, detach=detach)
+
+    @mcp.tool()
+    def theo_delete_edge(rel_type: str, from_id: str, to_id: str) -> dict[str, Any]:
+        """Delete a relationship from the knowledge graph.
+
+        Uses copy-on-write for safe mutation and exports CSVs after each write.
+        ``rel_type`` must be one of: PartOf, BelongsTo, InteractsWith,
+        DependsOn, Imports.
+        """
+        return handle_theo_delete_edge(db_path, csv_dir, rel_type, from_id, to_id)
 
     mcp.run("stdio")

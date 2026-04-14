@@ -1,6 +1,6 @@
 ---
 name: theo
-description: Provides codebase intelligence via a knowledge graph. Use in every coding session, when planning and/or before modifying any code to check for architecture, dependencies, and design rationale. Use also after every change to the codebase, to update the graph accordingly. Finally, use when the user explicitly writes `/theo`.
+description: Provides codebase intelligence via a knowledge graph. Use in every coding session, when planning and/or before modifying any code to check for architecture, dependencies, and design rationale. Use also after every change to the codebase, to update the graph accordingly. Finally, use when the user explicitly writes `theo`.
 ---
 
 # Introduction
@@ -75,6 +75,29 @@ theo_upsert_edge(rel_type: str, from_id: str, to_id: str, git_revision: str, des
 
 Create or update a relationship. `rel_type`: `PartOf`, `BelongsTo`, `InteractsWith`, `DependsOn`, `Imports`.
 
+## `theo_delete_node`
+
+```
+theo_delete_node(table: str, id: str, detach: bool = False) -> dict
+```
+
+Delete a node. `table` is `"Concept"` or `"SourceFile"`; `id` is the primary key value (`id` for `Concept`, `path` for `SourceFile`).
+
+Guardrails:
+
+- Refuses if the target `Concept` still has child `Concept`s (via `PartOf`) or owning `SourceFile`s (via `BelongsTo`). Re-parent or delete those first to avoid orphans.
+- Refuses if the node has other incident edges unless `detach=True` is passed. With `detach=True`, all incident edges are dropped together with the node.
+
+Use when a file has been removed from the repository, or when a `Concept` no longer exists after a refactor (merged, renamed, or split).
+
+## `theo_delete_edge`
+
+```
+theo_delete_edge(rel_type: str, from_id: str, to_id: str) -> dict
+```
+
+Delete a relationship. `rel_type`: `PartOf`, `BelongsTo`, `InteractsWith`, `DependsOn`, `Imports`. Use when a dependency or link no longer exists in the code.
+
 # Session startup protocol
 
 1. At the beginning of a session, call `theo_stats()` to check graph health.
@@ -108,6 +131,8 @@ Finally, operate as a **Simplicity Advocate**. Think about complexity reduction,
 After major modifications to a node, evaluate its parents, descendants, and peers for impact. Update them as needed, using the same "lenses" (architect, criticality finder, simplicity advocate, etc.)
 
 Proceed iteratively until you reach a stable state and no relevant modifications are possible in the graph.
+
+When the diff shows deleted files or a refactor that removes a concept, prune the graph accordingly: use `theo_delete_edge` to remove links that no longer hold, and `theo_delete_node` for files or concepts that no longer exist. If a `Concept` still has children, re-parent them first (upsert new `PartOf`/`BelongsTo` edges, then delete the old ones) before deleting the old `Concept`.
 
 Set `git_revision` on every node and edge you touch to the current git HEAD.
 
@@ -150,7 +175,7 @@ Follow the "Updating/building the graph" procedure starting from the changeset.
 
 # Structural coherence
 
-There shall be a root `Concept` node named after the repository. All other nodes shall have a parent.
+There shall be one root `Concept` node named after the repository (not the branch!) All other nodes shall have a parent.
 
 No circular relationships.
 
@@ -160,6 +185,6 @@ No `Concept` at level X can be the child (`PartOf` relationship) of a `Concept` 
 
 Always include `.theo/*.csv` files in the same commit as your code changes. The CSV files are the source of truth for the graph; the `.theo/db/` directory is gitignored and the graph is rebuilt at startup.
 
-## The `/theo` trigger
+## The `theo` trigger
 
-When a user types `/theo`, run `theo_stats()`, report graph health, ask what analysis or update they need.
+When a user types `theo` or uses the command `\theo`, run `theo_stats()`, report graph health, ask what analysis or update they need.

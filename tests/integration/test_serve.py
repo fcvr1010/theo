@@ -12,6 +12,8 @@ import pytest
 from theo._db import run_query, upsert_edge, upsert_node
 from theo.cli.serve import (
     _ensure_db,
+    handle_theo_delete_edge,
+    handle_theo_delete_node,
     handle_theo_query,
     handle_theo_stats,
     handle_theo_upsert_edge,
@@ -139,6 +141,78 @@ class TestHandleTheoUpsertEdge:
             "b",
             git_revision="abc123",
         )
+        assert result["status"] == "error"
+
+
+class TestHandleTheoDeleteNode:
+    def test_deletes_node_and_updates_csv(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        upsert_node(db_path, "Concept", {"id": "doomed", "name": "Doomed"})
+        # Prime CSV so we can verify it shrinks after deletion.
+        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "doomed", "name": "Doomed"})
+        assert "doomed" in (csv_dir / "concepts.csv").read_text()
+
+        result = handle_theo_delete_node(db_path, csv_dir, "Concept", "doomed")
+        assert result["status"] == "ok"
+        assert "doomed" not in (csv_dir / "concepts.csv").read_text()
+
+    def test_invalid_table_returns_error(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        result = handle_theo_delete_node(db_path, csv_dir, "Bogus", "x")
+        assert result["status"] == "error"
+
+    def test_refuses_without_detach_when_edges_exist(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        upsert_node(db_path, "SourceFile", {"path": "a.py"})
+        upsert_node(db_path, "SourceFile", {"path": "b.py"})
+        upsert_edge(db_path, "Imports", "a.py", "b.py", git_revision="r1")
+
+        result = handle_theo_delete_node(db_path, csv_dir, "SourceFile", "a.py")
+        assert result["status"] == "error"
+
+        # Node must still be there after the refused delete.
+        rows = run_query(db_path, "MATCH (n:SourceFile {path: 'a.py'}) RETURN count(n) AS c")
+        assert rows[0]["c"] == 1
+
+    def test_detach_true_succeeds(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        upsert_node(db_path, "SourceFile", {"path": "a.py"})
+        upsert_node(db_path, "SourceFile", {"path": "b.py"})
+        upsert_edge(db_path, "Imports", "a.py", "b.py", git_revision="r1")
+
+        result = handle_theo_delete_node(db_path, csv_dir, "SourceFile", "a.py", detach=True)
+        assert result["status"] == "ok"
+
+
+class TestHandleTheoDeleteEdge:
+    def test_deletes_edge_and_updates_csv(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        upsert_node(db_path, "Concept", {"id": "a"})
+        upsert_node(db_path, "Concept", {"id": "b"})
+        handle_theo_upsert_edge(db_path, csv_dir, "PartOf", "a", "b", "link", git_revision="r1")
+        assert "link" in (csv_dir / "part_of.csv").read_text()
+
+        result = handle_theo_delete_edge(db_path, csv_dir, "PartOf", "a", "b")
+        assert result["status"] == "ok"
+        assert (csv_dir / "part_of.csv").read_text().strip() == ""
+
+    def test_invalid_rel_type_returns_error(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        result = handle_theo_delete_edge(db_path, csv_dir, "Bogus", "a", "b")
+        assert result["status"] == "error"
+
+    def test_missing_edge_returns_error(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        upsert_node(db_path, "Concept", {"id": "a"})
+        upsert_node(db_path, "Concept", {"id": "b"})
+        result = handle_theo_delete_edge(db_path, csv_dir, "PartOf", "a", "b")
         assert result["status"] == "error"
 
 

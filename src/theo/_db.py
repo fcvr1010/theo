@@ -182,6 +182,141 @@ def upsert_edge(
     return {"status": "ok", "rel_type": rel_type, "from": from_id, "to": to_id}
 
 
+def delete_node(
+    db_path: Path,
+    table: str,
+    id: str,
+    *,
+    detach: bool = False,
+) -> dict[str, Any]:
+    """Delete a node.
+
+    Refuses (returns ``{"status": "error", ...}``) if:
+    - the table is unknown,
+    - the node does not exist,
+    - the node is a ``Concept`` with child ``Concept``s (via ``PartOf``) or
+      owning ``SourceFile``s (via ``BelongsTo``); the caller must re-parent
+      first to avoid orphans,
+    - the node has other incident edges and ``detach`` is ``False``.
+    """
+    if table not in PK_MAP:
+        return {"status": "error", "detail": f"Unknown node table: {table}"}
+
+    pk_field = PK_MAP[table]
+    _db, conn = _connect(db_path)
+
+    exists = _execute(
+        conn,
+        f"MATCH (n:{table} {{{pk_field}: $pk}}) RETURN count(n)",
+        {"pk": id},
+    )
+    if _scalar(exists) == 0:
+        return {"status": "error", "detail": f"{table} node '{id}' not found"}
+
+    # Orphaning guardrail: Concepts with children cannot be deleted.
+    if table == "Concept":
+        child_concepts = _scalar(
+            _execute(
+                conn,
+                "MATCH (c:Concept)-[:PartOf]->(n:Concept {id: $pk}) RETURN count(c)",
+                {"pk": id},
+            )
+        )
+        if child_concepts > 0:
+            return {
+                "status": "error",
+                "detail": (
+                    f"Concept '{id}' has {child_concepts} child Concept(s) via PartOf; "
+                    "re-parent or delete them first"
+                ),
+            }
+        child_files = _scalar(
+            _execute(
+                conn,
+                "MATCH (f:SourceFile)-[:BelongsTo]->(n:Concept {id: $pk}) RETURN count(f)",
+                {"pk": id},
+            )
+        )
+        if child_files > 0:
+            return {
+                "status": "error",
+                "detail": (
+                    f"Concept '{id}' has {child_files} SourceFile(s) belonging to it; "
+                    "re-link or delete them first"
+                ),
+            }
+
+    # Any remaining incident edges require opt-in detach.
+    if not detach:
+        edges = _scalar(
+            _execute(
+                conn,
+                f"MATCH (n:{table} {{{pk_field}: $pk}})-[r]-() RETURN count(r)",
+                {"pk": id},
+            )
+        )
+        if edges > 0:
+            return {
+                "status": "error",
+                "detail": (
+                    f"{table} node '{id}' has {edges} incident edge(s); "
+                    "pass detach=True to drop them"
+                ),
+            }
+
+    op = "DETACH DELETE" if detach else "DELETE"
+    _execute(
+        conn,
+        f"MATCH (n:{table} {{{pk_field}: $pk}}) {op} n",
+        {"pk": id},
+    )
+    return {"status": "ok", "table": table, "id": id}
+
+
+def delete_edge(
+    db_path: Path,
+    rel_type: str,
+    from_id: str,
+    to_id: str,
+) -> dict[str, Any]:
+    """Delete a relationship between two nodes.
+
+    Returns ``{"status": "error", ...}`` if the relationship type is unknown
+    or the edge does not exist.
+    """
+    if rel_type not in REL_ENDPOINTS:
+        return {"status": "error", "detail": f"Unknown relationship type: {rel_type}"}
+
+    from_table, to_table = REL_ENDPOINTS[rel_type]
+    from_pk = PK_MAP[from_table]
+    to_pk = PK_MAP[to_table]
+
+    _db, conn = _connect(db_path)
+
+    match_clause = (
+        f"MATCH (a:{from_table} {{{from_pk}: $from_id}})"
+        f"-[r:{rel_type}]->"
+        f"(b:{to_table} {{{to_pk}: $to_id}})"
+    )
+    check = _execute(
+        conn,
+        f"{match_clause} RETURN count(r)",
+        {"from_id": from_id, "to_id": to_id},
+    )
+    if _scalar(check) == 0:
+        return {
+            "status": "error",
+            "detail": f"{rel_type} edge from '{from_id}' to '{to_id}' not found",
+        }
+
+    _execute(
+        conn,
+        f"{match_clause} DELETE r",
+        {"from_id": from_id, "to_id": to_id},
+    )
+    return {"status": "ok", "rel_type": rel_type, "from": from_id, "to": to_id}
+
+
 def run_query(db_path: Path, cypher: str) -> list[dict[str, Any]]:
     """Run a read-only Cypher query and return a list of dicts."""
     _db, conn = _connect_ro(db_path)
