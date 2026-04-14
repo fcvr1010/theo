@@ -32,7 +32,7 @@ theo stats /path/to/your/project
 theo serve
 ```
 
-`theo use` creates the `.theo/` directory, sets up the database, writes skill files to `.claude/skills/theo/` (and `.agents/skills/theo/` for Cursor compatibility), and registers the MCP server in `.mcp.json`.
+`theo use` creates the `.theo/` directory, sets up the database, writes skill files to `.claude/skills/theo/` (and `.agents/skills/theo/` for Cursor compatibility), and registers the MCP server in both `.mcp.json` (Claude Code / Cursor) and `.codex/config.toml` (Codex).
 
 ## Development
 
