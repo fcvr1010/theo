@@ -24,6 +24,7 @@ repos:
           - typer>=0.10.0
           - mcp>=1.0.0
           - real-ladybug>=0.15.0
+          - flask>=3.0.0
 
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.44.0
