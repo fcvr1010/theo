@@ -21,6 +21,9 @@ theo = "theo.cli.main:app"
 semantic = [
     "fastembed>=0.7.0,<=0.8.0",
 ]
+ui = [
+    "flask>=3.0.0,<4.0.0",
+]
 dev = [
     "pytest>=9.0.0,<=9.0.2",
     "pytest-cov>=7.1.0,<=7.1.0",
@@ -41,12 +44,28 @@ src = ["src"]
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# ui.py contains a large embedded HTML/JS template where line length is unavoidable
+"src/theo/cli/ui.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "flask.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Flask is an optional dependency (ui extra). When absent, flask_app.route
+# resolves to Any, triggering untyped-decorator errors in strict mode.
+# Pre-commit mypy validates with Flask installed; this suppresses the error
+# only in CI where Flask is not synced.
+module = "theo.cli.ui"
+disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

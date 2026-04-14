@@ -1,6 +1,6 @@
 """Theo CLI entry point.
 
-Registers the ``use``, ``serve``, and ``stats`` subcommands.
+Registers the ``use``, ``serve``, ``stats``, and ``ui`` subcommands.
 """
 
 from __future__ import annotations
@@ -51,3 +51,20 @@ def stats(
     from theo.cli.stats import run
 
     run(project_dir)
+
+
+@app.command()
+def ui(
+    project_dir: str = typer.Argument(
+        ".",
+        help="Path to the project directory (defaults to cwd).",
+    ),
+    port: int = typer.Option(7777, help="Port to serve on."),
+    no_browser: bool = typer.Option(
+        False, "--no-browser", help="Don't open browser automatically."
+    ),
+) -> None:
+    """Start the Theo graph visualization server."""
+    from theo.cli.ui import run
+
+    run(project_dir, port=port, no_browser=no_browser)
