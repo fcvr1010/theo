@@ -191,6 +191,47 @@ def test_codex_config_idempotent(tmp_path: Path) -> None:
     assert first.count("[mcp_servers.theo]") == 1
 
 
+def test_creates_agents_md(tmp_path: Path) -> None:
+    run(str(tmp_path))
+    agents_md = tmp_path / "AGENTS.md"
+    assert agents_md.exists()
+    content = agents_md.read_text()
+    assert "# Theo" in content
+    assert "Use the theo skill to plan modifications" in content
+    assert "update theo's codebase intelligence" in content
+
+
+def test_agents_md_appends_to_existing(tmp_path: Path) -> None:
+    existing = "# Project\n\nSome intro.\n"
+    (tmp_path / "AGENTS.md").write_text(existing)
+    run(str(tmp_path))
+    content = (tmp_path / "AGENTS.md").read_text()
+    assert "# Project" in content
+    assert "Some intro." in content
+    assert "# Theo" in content
+
+
+def test_agents_md_idempotent(tmp_path: Path) -> None:
+    run(str(tmp_path))
+    run(str(tmp_path))
+    content = (tmp_path / "AGENTS.md").read_text()
+    assert content.count("# Theo") == 1
+
+
+def test_agents_md_replaces_stale_theo_section(tmp_path: Path) -> None:
+    stale = "# Project\n\nIntro.\n\n# Theo\n\nOld outdated instructions.\n\n# Other\n\nKeep me.\n"
+    (tmp_path / "AGENTS.md").write_text(stale)
+    run(str(tmp_path))
+    content = (tmp_path / "AGENTS.md").read_text()
+    assert "Old outdated instructions." not in content
+    assert "# Project" in content
+    assert "Intro." in content
+    assert "# Other" in content
+    assert "Keep me." in content
+    assert content.count("# Theo") == 1
+    assert "Use the theo skill to plan modifications" in content
+
+
 def test_codex_config_replaces_stale_theo_entry(tmp_path: Path) -> None:
     """A stale ``[mcp_servers.theo]`` entry is replaced, not duplicated."""
     codex_dir = tmp_path / ".codex"
