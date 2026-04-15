@@ -73,6 +73,44 @@ def _strip_codex_theo_section(content: str) -> str:
     return "".join(out)
 
 
+AGENTS_MD_SECTION = (
+    "# Theo\n"
+    "\n"
+    "Use the theo skill to plan modifications to the code, understand dependencies "
+    "and pitfalls. Once changes are done, use the theo skill to update theo's "
+    "codebase intelligence.\n"
+)
+
+
+def _strip_agents_md_theo_section(content: str) -> str:
+    """Remove any existing ``# Theo`` section (up to the next top-level heading)."""
+    out: list[str] = []
+    skipping = False
+    for line in content.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped.startswith("# "):
+            heading = stripped[2:].strip()
+            if heading.casefold() == "theo":
+                skipping = True
+                continue
+            if skipping:
+                skipping = False
+        if not skipping:
+            out.append(line)
+    return "".join(out)
+
+
+def _update_agents_md(project_dir: Path) -> None:
+    """Append (or refresh) the ``# Theo`` section in ``AGENTS.md``."""
+    agents_md = project_dir / "AGENTS.md"
+    if agents_md.exists():
+        cleaned = _strip_agents_md_theo_section(agents_md.read_text()).rstrip()
+        new_content = cleaned + "\n\n" + AGENTS_MD_SECTION if cleaned else AGENTS_MD_SECTION
+    else:
+        new_content = AGENTS_MD_SECTION
+    agents_md.write_text(new_content)
+
+
 def _update_codex_mcp_config(project_dir: Path, theo_cmd: list[str], project_dir_str: str) -> None:
     """Register Theo's MCP server in ``.codex/config.toml``.
 
@@ -177,5 +215,8 @@ def run(project_dir_str: str) -> None:
 
     # Write skill files to .agents/skills/theo/ (Cursor/Codex future compat)
     _write_skill_files(project_dir / ".agents" / "skills" / "theo")
+
+    # Ensure AGENTS.md mentions the theo skill (cross-tool instruction file)
+    _update_agents_md(project_dir)
 
     typer.echo(f"Theo initialised in {project_dir}")
