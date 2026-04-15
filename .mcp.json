@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "theo": {
+      "command": "/home/francesco/.local/bin/theo",
+      "args": [
+        "serve",
+        "/home/francesco/workspace/theo"
+      ],
+      "type": "stdio"
+    }
+  }
+}
