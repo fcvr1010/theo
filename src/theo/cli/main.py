@@ -1,6 +1,6 @@
 """Theo CLI entry point.
 
-Registers the ``use``, ``serve``, ``stats``, and ``ui`` subcommands.
+Registers the ``use``, ``serve``, ``stats``, ``reload``, and ``ui`` subcommands.
 """
 
 from __future__ import annotations
@@ -49,6 +49,19 @@ def stats(
 ) -> None:
     """Print graph statistics and freshness info."""
     from theo.cli.stats import run
+
+    run(project_dir)
+
+
+@app.command()
+def reload(
+    project_dir: str = typer.Argument(
+        ".",
+        help="Path to the project directory (defaults to cwd).",
+    ),
+) -> None:
+    """Rebuild the runtime DB from the on-disk CSV files."""
+    from theo.cli.reload import run
 
     run(project_dir)
 
