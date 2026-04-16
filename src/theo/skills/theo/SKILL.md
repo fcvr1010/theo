@@ -120,13 +120,13 @@ While creating nodes, fill in their `description` with a paragraph about what th
 
 Build relationships between nodes as you go.
 
-Then, operate as an **Interface Designer** on all modified nodes. Ask yourself, what can we learn about API contracts, public interface, protocol design and document your findings into the appropriate `notes`. Build needed relationships between nodes as you go.
+Then, operate as an **Interface Designer** on all modified nodes. Ask yourself, what can we learn about API contracts, public interface, protocol design and document your findings into the appropriate `notes`. Build additional relationships as needed.
 
-Then, operate as a **Dependency Master** on all modified nodes. Ask yourself, what subtle dependencies exist between components. If we change something in A, what breaks in B? Any performance impact in C from a change of the order of an operation in D? Any circular dep? Any unnecessary coupling? Document your finding into the appropriate `notes`. Build needed relationships between nodes as you go.
+Then, operate as a **Dependency Master** on all modified nodes. Ask yourself, what subtle dependencies exist between components. If we change something in A, what breaks in B? Any performance impact in C from a change of the order of an operation in D? Any circular dep? Any unnecessary coupling? Document your finding into the appropriate `notes`. Build additional relationships as needed.
 
-Then, operate as a **Criticality Finder**. Take an overall look and judge: what are the critical paths we should be aware of? Any single points of failure? Any code smells? Any bad design patterns? Document your finding into the appropriate `notes`. Build needed relationships between nodes as you go.
+Then, operate as a **Criticality Finder**. Take an overall look and judge: what are the critical paths we should be aware of? Any single points of failure? Any code smells? Any bad design patterns? Document your finding into the appropriate `notes`. Build additional relationships as needed.
 
-Finally, operate as a **Simplicity Advocate**. Think about complexity reduction, dead code removal, over-engineering smells. Anything that you see and that could be changed to make the code better? Document your finding into the appropriate `notes`. Build needed relationships between nodes as you go.
+Finally, operate as a **Simplicity Advocate**. Think about complexity reduction, dead code removal, over-engineering smells. Anything that you see and that could be changed to make the code better? Document your finding into the appropriate `notes`. Build additional relationships as needed.
 
 After major modifications to a node, evaluate its parents, descendants, and peers for impact. Update them as needed, using the same "lenses" (architect, criticality finder, simplicity advocate, etc.)
 
@@ -160,6 +160,12 @@ When updating nodes, do not stack notes after notes, re-evaluate the entire cont
 
 The point of the semantic analysis is NOT to document every little, irrelevant detail. Do not iterate forever updating notes. Judge whether something meaningful warrants an update. If there's nothing, it's fine to say so and move on.
 
+# Exploration protocol
+
+Whenever you need to explore the codebase, start by querying for any nodes or relationship that match your search criteria. Explore their notes, and explore their neighbors. Iterate as needed.
+
+This needs not replace direct grep or source code reading, but it can inform such process enormously and make you aware of the tricky bits that are easy to miss.
+
 # Query-before-act protocol
 
 Before modifying any module, function, or file:
@@ -172,6 +178,10 @@ Before modifying any module, function, or file:
 # Post-change protocol
 
 Follow the "Updating/building the graph" procedure starting from the changeset.
+
+# Self-reflection protocol
+
+After any major exploration of the codebase, ask yourself if you learned anything new about the nodes or their relationship, anything worth tracking for the future. In case, update the graph accordingly.
 
 # Structural coherence
 
