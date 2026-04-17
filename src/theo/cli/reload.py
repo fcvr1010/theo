@@ -12,7 +12,8 @@ from pathlib import Path
 
 import typer
 
-from theo._db import get_stats, rebuild_from_csv
+from theo._db import get_stats, rebuild_from_csv, reindex_all
+from theo._embed import is_available
 from theo._git import find_theo_root
 from theo._schema import CSV_FILES
 
@@ -43,6 +44,14 @@ def run(project_dir_str: str) -> None:
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
     rebuild_from_csv(db_path, csv_dir)
+
+    if is_available():
+        typer.echo("Reindexing embeddings...")
+        counts = reindex_all(db_path)
+        for table, n in counts.items():
+            typer.echo(f"  {table:20s} {n:>6d}")
+    else:
+        typer.echo("Skipping reindex: fastembed not installed (pip install 'theo[semantic]').")
 
     stats = get_stats(db_path)
     typer.echo(f"Reloaded {db_path} from CSVs in {csv_dir}.")

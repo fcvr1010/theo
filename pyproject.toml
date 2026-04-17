@@ -60,6 +60,12 @@ module = "flask.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# fastembed is an optional dependency (semantic extra).  When absent,
+# imports in theo._embed resolve to Any; we guard them at runtime.
+module = ["fastembed", "fastembed.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # Flask is an optional dependency (ui extra). When absent, flask_app.route
 # resolves to Any, triggering untyped-decorator errors in strict mode.
 # Pre-commit mypy validates with Flask installed; this suppresses the error

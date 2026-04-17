@@ -64,3 +64,29 @@ class TestReload:
         (tmp_theo_project / ".theo" / "concepts.csv").unlink()
         with pytest.raises(click.exceptions.Exit):
             run(str(tmp_theo_project))
+
+    @pytest.mark.integration  # type: ignore[misc]
+    def test_reload_rebuilds_embeddings(self, tmp_theo_project: Path) -> None:
+        pytest.importorskip("fastembed")
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+
+        upsert_node(
+            db_path,
+            "Concept",
+            {
+                "id": "described",
+                "name": "D",
+                "description": "a described thing",
+                "git_revision": "r",
+            },
+        )
+        export_csv(db_path, csv_dir)
+        db_path.unlink()
+
+        run(str(tmp_theo_project))
+
+        rows = run_query(
+            db_path, "MATCH (n:Concept {id: 'described'}) RETURN n.embedding IS NULL AS is_null"
+        )
+        assert rows[0]["is_null"] is False

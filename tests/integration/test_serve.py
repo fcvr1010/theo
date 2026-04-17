@@ -9,12 +9,14 @@ from unittest.mock import patch
 import click
 import pytest
 
-from theo._db import run_query, upsert_edge, upsert_node
+from theo._db import export_csv, run_query, upsert_edge, upsert_node
 from theo.cli.serve import (
     _ensure_db,
     handle_theo_delete_edge,
     handle_theo_delete_node,
     handle_theo_query,
+    handle_theo_reload,
+    handle_theo_search,
     handle_theo_stats,
     handle_theo_upsert_edge,
     handle_theo_upsert_node,
@@ -243,9 +245,221 @@ class TestEnsureDb:
         with pytest.raises(click.exceptions.Exit):
             _ensure_db(db_path, csv_dir)
 
-    def test_noop_when_db_exists(self, tmp_theo_project: Path) -> None:
+    def test_does_not_rebuild_when_db_exists(self, tmp_theo_project: Path) -> None:
+        # The fixture's fresh DB has the embedding column via DDL, so the
+        # idempotent migration inside _ensure_db is a no-op, but it still
+        # opens a connection which bumps mtime.  What we actually care about
+        # is that _ensure_db does NOT re-run ``rebuild_from_csv`` (that would
+        # wipe any runtime state).  Check that by seeding a marker Concept
+        # via the DB directly and verifying it survives the call.
         db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
         csv_dir = tmp_theo_project / ".theo"
-        mtime_before = db_path.stat().st_mtime
+
+        upsert_node(
+            db_path,
+            "Concept",
+            {"id": "survivor", "name": "Survivor", "git_revision": "abc"},
+        )
         _ensure_db(db_path, csv_dir)
-        assert db_path.stat().st_mtime == mtime_before
+        rows = run_query(db_path, "MATCH (n:Concept {id: 'survivor'}) RETURN n.name")
+        assert rows and rows[0]["n.name"] == "Survivor"
+
+
+@pytest.mark.integration
+class TestHandleTheoSearch:
+    def _seed(self, db_path: Path, csv_dir: Path) -> None:
+        handle_theo_upsert_node(
+            db_path,
+            csv_dir,
+            "Concept",
+            {
+                "id": "auth",
+                "name": "Auth",
+                "level": 1,
+                "description": "User login and JWT token validation.",
+                "git_revision": "r",
+            },
+        )
+        handle_theo_upsert_node(
+            db_path,
+            csv_dir,
+            "Concept",
+            {
+                "id": "ui",
+                "name": "UI",
+                "level": 1,
+                "description": "Frontend HTML rendering.",
+                "git_revision": "r",
+            },
+        )
+
+    def test_returns_matches(self, tmp_theo_project: Path) -> None:
+        pytest.importorskip("fastembed")
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        self._seed(db_path, csv_dir)
+
+        result = handle_theo_search(db_path, "how does login work?", None, 5)
+        assert result["status"] == "ok"
+        assert result["matches"], "expected at least one match"
+        # Top result should be the auth concept.
+        assert result["matches"][0]["ref"]["id"] == "auth"
+
+    def test_rejects_bad_table(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        result = handle_theo_search(db_path, "x", "Nonsense", 1)
+        assert result["status"] == "error"
+
+    def test_reports_missing_fastembed(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        with patch("theo.cli.serve.is_available", return_value=False):
+            result = handle_theo_search(db_path, "x", None, 1)
+        assert result["status"] == "error"
+        assert "fastembed" in result["detail"]
+
+
+@pytest.mark.integration
+class TestAutoIndex:
+    def test_upsert_node_populates_embedding(self, tmp_theo_project: Path) -> None:
+        pytest.importorskip("fastembed")
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        handle_theo_upsert_node(
+            db_path,
+            csv_dir,
+            "Concept",
+            {
+                "id": "auto",
+                "name": "Auto",
+                "description": "auto-indexed via the upsert handler",
+                "git_revision": "r",
+            },
+        )
+        rows = run_query(
+            db_path, "MATCH (n:Concept {id: 'auto'}) RETURN n.embedding IS NULL AS is_null"
+        )
+        assert rows[0]["is_null"] is False
+
+    def test_upsert_edge_populates_embedding(self, tmp_theo_project: Path) -> None:
+        pytest.importorskip("fastembed")
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "a", "git_revision": "r"})
+        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "b", "git_revision": "r"})
+        handle_theo_upsert_edge(
+            db_path,
+            csv_dir,
+            "PartOf",
+            "a",
+            "b",
+            description="a is part of b",
+            git_revision="r",
+        )
+        rows = run_query(
+            db_path,
+            "MATCH (:Concept {id:'a'})-[r:PartOf]->(:Concept {id:'b'}) "
+            "RETURN r.embedding IS NULL AS is_null",
+        )
+        assert rows[0]["is_null"] is False
+
+    def test_edge_embedding_failure_does_not_fail_upsert(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        # Seed the endpoint nodes so the upsert_edge call is valid.
+        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "a", "git_revision": "r"})
+        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "b", "git_revision": "r"})
+
+        def boom(_texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("embedding backend exploded")
+
+        with patch("theo.cli.serve.embed_documents", side_effect=boom):
+            result = handle_theo_upsert_edge(
+                db_path,
+                csv_dir,
+                "PartOf",
+                "a",
+                "b",
+                description="important edge",
+                git_revision="r",
+            )
+        assert result["status"] == "ok"
+        rows = run_query(
+            db_path,
+            "MATCH (:Concept {id: 'a'})-[r:PartOf]->(:Concept {id: 'b'}) RETURN count(r) AS c",
+        )
+        assert rows[0]["c"] == 1
+
+    def test_embedding_failure_does_not_fail_upsert(self, tmp_theo_project: Path) -> None:
+        # When embedding raises, the upsert must still return ok and the
+        # node must exist in the graph.
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+
+        def boom(_texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("embedding backend exploded")
+
+        with patch("theo.cli.serve.embed_documents", side_effect=boom):
+            result = handle_theo_upsert_node(
+                db_path,
+                csv_dir,
+                "Concept",
+                {
+                    "id": "robust",
+                    "description": "written even though embedding explodes",
+                    "git_revision": "r",
+                },
+            )
+        assert result["status"] == "ok"
+        rows = run_query(db_path, "MATCH (n:Concept {id: 'robust'}) RETURN n.name")
+        assert len(rows) == 1
+
+
+class TestHandleTheoReload:
+    def test_rebuilds_from_csv(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+
+        upsert_node(db_path, "Concept", {"id": "persisted", "name": "P"})
+        export_csv(db_path, csv_dir)
+        # Ephemeral state only in the DB, not in CSVs.
+        upsert_node(db_path, "Concept", {"id": "ghost", "name": "G"})
+
+        result = handle_theo_reload(db_path, csv_dir)
+        assert result["status"] == "ok"
+        assert result["rebuilt"] is True
+
+        rows = run_query(db_path, "MATCH (n:Concept {id: 'ghost'}) RETURN count(n) AS c")
+        assert rows[0]["c"] == 0
+        rows = run_query(db_path, "MATCH (n:Concept {id: 'persisted'}) RETURN n.name")
+        assert rows[0]["n.name"] == "P"
+
+    def test_reports_missing_csvs(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        (csv_dir / "concepts.csv").unlink()
+        result = handle_theo_reload(db_path, csv_dir)
+        assert result["status"] == "error"
+        assert "concepts.csv" in result["detail"]
+
+    @pytest.mark.integration  # type: ignore[misc]
+    def test_reindexes_when_fastembed_available(self, tmp_theo_project: Path) -> None:
+        pytest.importorskip("fastembed")
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+
+        upsert_node(
+            db_path,
+            "Concept",
+            {"id": "with_desc", "name": "WD", "description": "a described thing"},
+        )
+        export_csv(db_path, csv_dir)
+
+        result = handle_theo_reload(db_path, csv_dir)
+        assert result["status"] == "ok"
+        assert isinstance(result["reindex"], dict)
+        assert result["reindex"]["Concept"] == 1
+
+        rows = run_query(
+            db_path, "MATCH (n:Concept {id: 'with_desc'}) RETURN n.embedding IS NULL AS is_null"
+        )
+        assert rows[0]["is_null"] is False

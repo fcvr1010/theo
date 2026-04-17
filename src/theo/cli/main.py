@@ -1,6 +1,7 @@
 """Theo CLI entry point.
 
-Registers the ``use``, ``serve``, ``stats``, ``reload``, and ``ui`` subcommands.
+Registers the ``use``, ``serve``, ``stats``, ``reload``, ``reindex``, and
+``ui`` subcommands.
 """
 
 from __future__ import annotations
@@ -62,6 +63,19 @@ def reload(
 ) -> None:
     """Rebuild the runtime DB from the on-disk CSV files."""
     from theo.cli.reload import run
+
+    run(project_dir)
+
+
+@app.command()
+def reindex(
+    project_dir: str = typer.Argument(
+        ".",
+        help="Path to the project directory (defaults to cwd).",
+    ),
+) -> None:
+    """Recompute semantic embeddings for all nodes and relationships."""
+    from theo.cli.reindex import run
 
     run(project_dir)
 
