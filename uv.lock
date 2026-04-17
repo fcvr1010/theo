@@ -1910,6 +1910,7 @@ name = "theo"
 version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastembed" },
     { name = "mcp" },
     { name = "real-ladybug" },
     { name = "typer" },
@@ -1923,16 +1924,13 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
-semantic = [
-    { name = "fastembed" },
-]
 ui = [
     { name = "flask" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastembed", marker = "extra == 'semantic'", specifier = ">=0.7.0,<=0.8.0" },
+    { name = "fastembed", specifier = ">=0.7.0,<=0.8.0" },
     { name = "flask", marker = "extra == 'ui'", specifier = ">=3.0.0,<4.0.0" },
     { name = "mcp", specifier = ">=1.27.0,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "<=1.20.0,>=1.20.0" },
@@ -1943,7 +1941,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.0,<=0.15.8" },
     { name = "typer", specifier = ">=0.24.1,<1.0.0" },
 ]
-provides-extras = ["semantic", "ui", "dev"]
+provides-extras = ["ui", "dev"]
 
 [[package]]
 name = "tokenizers"

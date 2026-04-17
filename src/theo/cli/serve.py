@@ -32,9 +32,9 @@ from theo._db import (
     write_node_embedding,
 )
 from theo._embed import (
+    _get_model,
     embed_documents,
     embed_query,
-    is_available,
     make_edge_text,
     make_node_text,
 )
@@ -91,30 +91,12 @@ def _ensure_db(db_path: Path, csv_dir: Path) -> None:
 #
 # Auto-index runs AFTER the COW commit + CSV export.  Embedding is a derived
 # cache, so failures must never roll back a successful upsert: we swallow
-# exceptions and log them.  When fastembed is not installed we log the miss
-# once at WARNING then stay quiet at DEBUG level.
+# exceptions and log them.
 # ---------------------------------------------------------------------------
-
-_AUTOINDEX_MISS_LOGGED = False
-
-
-def _log_autoindex_miss() -> None:
-    global _AUTOINDEX_MISS_LOGGED
-    if not _AUTOINDEX_MISS_LOGGED:
-        _log.warning(
-            "Skipping auto-indexing on write: fastembed not installed. "
-            "Install with: pip install 'theo[semantic]'."
-        )
-        _AUTOINDEX_MISS_LOGGED = True
-    else:
-        _log.debug("Auto-index skipped (fastembed missing)")
 
 
 def _auto_index_node(db_path: Path, table: str, properties: dict[str, Any]) -> None:
     """Best-effort: embed the node's text fields and store the vector."""
-    if not is_available():
-        _log_autoindex_miss()
-        return
     text = make_node_text(properties.get("description"), properties.get("notes"))
     if not text:
         return
@@ -133,9 +115,6 @@ def _auto_index_edge(
     description: str | None,
 ) -> None:
     """Best-effort: embed the edge's description and store the vector."""
-    if not is_available():
-        _log_autoindex_miss()
-        return
     text = make_edge_text(description)
     if not text:
         return
@@ -193,8 +172,8 @@ def handle_theo_search(
     describing a node (``kind="node"``) or a relationship (``kind="edge"``)
     with its similarity ``score``.
 
-    Returns ``{"status": "error", "detail": ...}`` if fastembed is missing,
-    the table filter is invalid, or the underlying query fails.
+    Returns ``{"status": "error", "detail": ...}`` if the table filter is
+    invalid or the underlying query fails.
     """
     if table is not None and table not in EMBEDDABLE_TABLES:
         return {
@@ -212,11 +191,6 @@ def handle_theo_search(
         return {"status": "error", "detail": f"top_k must be >= 1, got: {top_k_int}"}
     top_k_int = min(top_k_int, 1000)
 
-    if not is_available():
-        return {
-            "status": "error",
-            "detail": "fastembed not installed. Install with: pip install 'theo[semantic]'.",
-        }
     try:
         qvec = embed_query(query)
         matches = semantic_search(db_path, qvec, table, top_k_int)
@@ -236,8 +210,8 @@ def handle_theo_reload(db_path: Path, csv_dir: Path) -> dict[str, Any]:
     means the MCP server itself owns the rebuild — no external process races
     with the live server for DB access.
 
-    Sequence: validate that CSVs exist → ``rebuild_from_csv`` → if fastembed
-    is installed, ``reindex_all`` so search is usable immediately.
+    Sequence: validate that CSVs exist → ``rebuild_from_csv`` →
+    ``reindex_all`` so search is usable immediately.
     """
     required = [CSV_FILES[t] for t in NODE_TABLES]
     missing = [name for name in required if not (csv_dir / name).exists()]
@@ -252,24 +226,22 @@ def handle_theo_reload(db_path: Path, csv_dir: Path) -> dict[str, Any]:
     except Exception as exc:
         return {"status": "error", "detail": f"rebuild failed: {exc}"}
 
-    reindex_counts: dict[str, int] | None = None
-    if is_available():
-        try:
-            reindex_counts = reindex_all(db_path)
-        except Exception as exc:
-            # The structural rebuild succeeded; only embeddings failed.
-            _log.exception("reindex_all failed after rebuild")
-            return {
-                "status": "ok",
-                "rebuilt": True,
-                "reindex": {"status": "error", "detail": str(exc)},
-                "stats": get_stats(db_path),
-            }
+    try:
+        reindex_counts = reindex_all(db_path)
+    except Exception as exc:
+        # The structural rebuild succeeded; only embeddings failed.
+        _log.exception("reindex_all failed after rebuild")
+        return {
+            "status": "ok",
+            "rebuilt": True,
+            "reindex": {"status": "error", "detail": str(exc)},
+            "stats": get_stats(db_path),
+        }
 
     return {
         "status": "ok",
         "rebuilt": True,
-        "reindex": reindex_counts if reindex_counts is not None else "skipped (fastembed missing)",
+        "reindex": reindex_counts,
         "stats": get_stats(db_path),
     }
 
@@ -423,11 +395,8 @@ def run(project_dir_str: str) -> None:
 
     # Pre-warm the embedding model so the first MCP write/search is not
     # blocked ~2 s on cold-start model load.
-    if is_available():
-        from theo._embed import _get_model
-
-        with contextlib.suppress(Exception):
-            _get_model()
+    with contextlib.suppress(Exception):
+        _get_model()
 
     mcp = FastMCP("theo")
 
@@ -472,8 +441,6 @@ def run(project_dir_str: str) -> None:
         ``table`` optionally restricts the search to one embeddable table
         ("Concept", "SourceFile", "PartOf", "BelongsTo", "InteractsWith",
         "DependsOn", "Imports") or ``null`` for all.
-
-        Requires the ``semantic`` extra: ``pip install 'theo[semantic]'``.
         """
         return handle_theo_search(db_path, query, table, top_k)
 
@@ -486,8 +453,8 @@ def run(project_dir_str: str) -> None:
         server so no external process races with it for DB access (as would
         happen if you shelled out to ``theo reload``).
 
-        If the ``semantic`` extra is installed, embeddings are recomputed
-        automatically so search is usable immediately after reload.
+        Embeddings are recomputed automatically so search is usable
+        immediately after reload.
 
         Returns ``{"status": "ok", "rebuilt": true, "reindex": {...},
         "stats": {...}}``.

@@ -14,7 +14,6 @@ from pathlib import Path
 import typer
 
 from theo._db import migrate_embedding_column, reindex_all
-from theo._embed import is_available
 from theo._git import find_theo_root
 
 
@@ -31,13 +30,6 @@ def run(project_dir_str: str) -> None:
     db_path = root / config["db_path"]
     if not db_path.exists():
         typer.echo(f"Error: database not found at {db_path}. Run 'theo use' first.", err=True)
-        raise typer.Exit(1)
-
-    if not is_available():
-        typer.echo(
-            "Error: fastembed is not installed. Install with: pip install 'theo[semantic]'.",
-            err=True,
-        )
         raise typer.Exit(1)
 
     # Guarantee the embedding column exists on older DBs.

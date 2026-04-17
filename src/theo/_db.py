@@ -422,9 +422,7 @@ def reindex_all(db_path: Path) -> dict[str, int]:
     3. **Write** (writer conn): for each node table run drop-SET-create;
        for each rel table just SET.
 
-    Returns per-table counts of rows that received a fresh embedding.  The
-    caller is responsible for checking :func:`theo._embed.is_available`
-    before invoking this function.
+    Returns per-table counts of rows that received a fresh embedding.
     """
     from theo._embed import embed_documents, make_edge_text, make_node_text
 

@@ -310,13 +310,6 @@ class TestHandleTheoSearch:
         result = handle_theo_search(db_path, "x", "Nonsense", 1)
         assert result["status"] == "error"
 
-    def test_reports_missing_fastembed(self, tmp_theo_project: Path) -> None:
-        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
-        with patch("theo.cli.serve.is_available", return_value=False):
-            result = handle_theo_search(db_path, "x", None, 1)
-        assert result["status"] == "error"
-        assert "fastembed" in result["detail"]
-
 
 @pytest.mark.integration
 class TestAutoIndex:

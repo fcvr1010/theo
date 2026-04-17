@@ -82,7 +82,7 @@ Returns `{"status": "ok", "matches": [...]}` where each match follows a uniform 
 }
 ```
 
-Requires the `semantic` optional extra (`pip install 'theo[semantic]'`). Returns `{"status": "error", ...}` with an install hint when the extra is missing. Node tables use an HNSW index for fast search when one exists and fall back to brute-force cosine similarity; relationship tables always use brute force.
+Node tables use an HNSW index for fast search when one exists and fall back to brute-force cosine similarity; relationship tables always use brute force.
 
 Embeddings live only in the runtime DB (never in CSVs). They are auto-maintained on `theo_upsert_node` / `theo_upsert_edge`, rebuilt on `theo reload`, and can be recomputed on demand with `theo reindex`.
 
@@ -94,7 +94,7 @@ theo_reload() -> dict
 
 Rebuild the runtime DB from the on-disk `.theo/*.csv` files. Use after pulling git changes that touched the CSVs, or after editing them by hand. Runs in-process so no external process races with the MCP server for DB access.
 
-If the `semantic` extra is installed, embeddings are recomputed automatically so `theo_search` is usable immediately afterwards. Returns `{"status": "ok", "rebuilt": true, "reindex": {...}, "stats": {...}}`.
+Embeddings are recomputed automatically so `theo_search` is usable immediately afterwards. Returns `{"status": "ok", "rebuilt": true, "reindex": {...}, "stats": {...}}`.
 
 ## `theo_upsert_node`
 

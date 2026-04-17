@@ -12,15 +12,13 @@ dependencies = [
     "real-ladybug<=0.15.3,>=0.15.3",
     "mcp>=1.27.0,<2.0.0",
     "typer>=0.24.1,<1.0.0",
+    "fastembed>=0.7.0,<=0.8.0",
 ]
 
 [project.scripts]
 theo = "theo.cli.main:app"
 
 [project.optional-dependencies]
-semantic = [
-    "fastembed>=0.7.0,<=0.8.0",
-]
 ui = [
     "flask>=3.0.0,<4.0.0",
 ]
@@ -60,8 +58,7 @@ module = "flask.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# fastembed is an optional dependency (semantic extra).  When absent,
-# imports in theo._embed resolve to Any; we guard them at runtime.
+# fastembed ships no type stubs.
 module = ["fastembed", "fastembed.*"]
 ignore_missing_imports = true
 
