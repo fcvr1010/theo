@@ -37,3 +37,4 @@ LICENSE,theo,,c47921d18e3b269886d0d301a746bc937c5dff2c
 .github/workflows/ci.yml,tests,,c47921d18e3b269886d0d301a746bc937c5dff2c
 .github/workflows/integration.yml,tests,,c47921d18e3b269886d0d301a746bc937c5dff2c
 .github/dependabot.yml,theo,,c47921d18e3b269886d0d301a746bc937c5dff2c
+src/theo/cli/reload.py,cli_commands,,d009f2a65db235124aa95065178bad092ee05656

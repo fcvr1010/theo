@@ -76,6 +76,51 @@ class TestTheoUseE2E:
 
 
 @pytest.mark.e2e
+class TestTheoReloadE2E:
+    def test_reload_picks_up_manual_csv_edit(self, tmp_path: Path) -> None:
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, text=True, check=True)
+        git_result = subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.email=test@example.com",
+                "-c",
+                "user.name=Test",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert git_result.returncode == 0, f"git commit failed: {git_result.stderr}"
+        subprocess.run(["theo", "use", str(tmp_path)], capture_output=True, text=True, check=True)
+
+        # Simulate a manual edit to the CSV source-of-truth.
+        concepts_csv = tmp_path / ".theo" / "concepts.csv"
+        concepts_csv.write_text('manual,"Manual Concept",0,"","",""\n')
+
+        result = subprocess.run(
+            ["theo", "reload", str(tmp_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"stderr: {result.stderr}"
+        assert "Reloaded" in result.stdout
+
+        stats = subprocess.run(
+            ["theo", "stats", str(tmp_path)],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        # One Concept row (from the manual CSV edit) should now be in the DB.
+        assert "Concept" in stats.stdout
+
+
+@pytest.mark.e2e
 class TestTheoStatsE2E:
     def test_stats_exits_zero(self, tmp_path: Path) -> None:
         # Init a git repo and theo project

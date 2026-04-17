@@ -1,4 +1,5 @@
 mcp_interface,graph_core,"serve.py uses every graph_core primitive: _db ops, _cow envelope, _git for HEAD/root, _schema for validation",c47921d18e3b269886d0d301a746bc937c5dff2c
+cli_commands,graph_db,"`theo reload` calls `rebuild_from_csv`, and `theo stats` calls `get_stats` -- CLI commands are thin wrappers over graph DB ops.",d009f2a65db235124aa95065178bad092ee05656
 cli_commands,graph_core,stats.py uses _db.get_stats and _git helpers; main.py lazy-imports into graph_core subsystems indirectly,c47921d18e3b269886d0d301a746bc937c5dff2c
 ui_server,git_helpers,ui.py uses find_theo_root to locate config.json; talks to KuzuDB directly (bypasses _db.py) because it needs a long-lived connection per-request,c47921d18e3b269886d0d301a746bc937c5dff2c
 graph_db,graph_schema,"_db.py imports all schema constants (tables, PKs, DDL, column orders) and drives KuzuDB operations from them",c47921d18e3b269886d0d301a746bc937c5dff2c
