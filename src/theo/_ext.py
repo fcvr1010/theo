@@ -6,6 +6,8 @@ Centralises the INSTALL / LOAD dance for extensions that Theo needs (today:
 
 from __future__ import annotations
 
+import contextlib
+
 import real_ladybug as lb
 
 
@@ -16,8 +18,6 @@ def load_vector_ext(conn: lb.Connection) -> None:
     has already been linked; we swallow that specific failure.  ``LOAD`` is
     required per connection.
     """
-    import contextlib
-
     with contextlib.suppress(RuntimeError):
         conn.execute("INSTALL VECTOR")
     conn.execute("LOAD EXTENSION VECTOR")

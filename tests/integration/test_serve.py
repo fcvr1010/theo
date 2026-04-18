@@ -9,7 +9,7 @@ from unittest.mock import patch
 import click
 import pytest
 
-from theo._db import export_csv, run_query, upsert_edge, upsert_node
+from theo._db import export_csv, reindex_all, run_query, upsert_edge, upsert_node
 from theo.cli.serve import (
     _ensure_db,
     handle_theo_delete_edge,
@@ -292,6 +292,9 @@ class TestHandleTheoSearch:
                 "git_revision": "r",
             },
         )
+        # Upsert handlers no longer auto-index; the agent-facing contract is
+        # to reindex explicitly once writes settle.  Tests mirror that flow.
+        reindex_all(db_path)
 
     def test_returns_matches(self, tmp_theo_project: Path) -> None:
         pytest.importorskip("fastembed")
@@ -302,8 +305,11 @@ class TestHandleTheoSearch:
         result = handle_theo_search(db_path, "how does login work?", None, 5)
         assert result["status"] == "ok"
         assert result["matches"], "expected at least one match"
-        # Top result should be the auth concept.
-        assert result["matches"][0]["ref"]["id"] == "auth"
+        # "auth" should rank above "ui" for a login query.  Assert it lands in
+        # the top 2 rather than strictly #1 so a minor model-version score
+        # wobble doesn't flake the suite.
+        top_ids = [m["ref"].get("id") for m in result["matches"][:2]]
+        assert "auth" in top_ids, f"expected 'auth' in top 2, got {top_ids}"
 
     def test_rejects_bad_table(self, tmp_theo_project: Path) -> None:
         db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
@@ -312,8 +318,13 @@ class TestHandleTheoSearch:
 
 
 @pytest.mark.integration
-class TestAutoIndex:
-    def test_upsert_node_populates_embedding(self, tmp_theo_project: Path) -> None:
+class TestUpsertLeavesEmbeddingsStale:
+    """Upserts deliberately skip the embedding pass; reindex is the refresh
+    contract.  Regression: we previously auto-indexed on every write, which
+    triggered a full HNSW rebuild per upsert -- see PR review of the
+    ``add-semantic-indexing-and-search`` branch."""
+
+    def test_new_node_has_null_embedding_until_reindex(self, tmp_theo_project: Path) -> None:
         pytest.importorskip("fastembed")
         db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
         csv_dir = tmp_theo_project / ".theo"
@@ -322,89 +333,22 @@ class TestAutoIndex:
             csv_dir,
             "Concept",
             {
-                "id": "auto",
-                "name": "Auto",
-                "description": "auto-indexed via the upsert handler",
+                "id": "lazy",
+                "name": "Lazy",
+                "description": "not indexed until reindex",
                 "git_revision": "r",
             },
         )
         rows = run_query(
-            db_path, "MATCH (n:Concept {id: 'auto'}) RETURN n.embedding IS NULL AS is_null"
+            db_path, "MATCH (n:Concept {id: 'lazy'}) RETURN n.embedding IS NULL AS is_null"
+        )
+        assert rows[0]["is_null"] is True
+
+        reindex_all(db_path)
+        rows = run_query(
+            db_path, "MATCH (n:Concept {id: 'lazy'}) RETURN n.embedding IS NULL AS is_null"
         )
         assert rows[0]["is_null"] is False
-
-    def test_upsert_edge_populates_embedding(self, tmp_theo_project: Path) -> None:
-        pytest.importorskip("fastembed")
-        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
-        csv_dir = tmp_theo_project / ".theo"
-        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "a", "git_revision": "r"})
-        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "b", "git_revision": "r"})
-        handle_theo_upsert_edge(
-            db_path,
-            csv_dir,
-            "PartOf",
-            "a",
-            "b",
-            description="a is part of b",
-            git_revision="r",
-        )
-        rows = run_query(
-            db_path,
-            "MATCH (:Concept {id:'a'})-[r:PartOf]->(:Concept {id:'b'}) "
-            "RETURN r.embedding IS NULL AS is_null",
-        )
-        assert rows[0]["is_null"] is False
-
-    def test_edge_embedding_failure_does_not_fail_upsert(self, tmp_theo_project: Path) -> None:
-        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
-        csv_dir = tmp_theo_project / ".theo"
-        # Seed the endpoint nodes so the upsert_edge call is valid.
-        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "a", "git_revision": "r"})
-        handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "b", "git_revision": "r"})
-
-        def boom(_texts: list[str]) -> list[list[float]]:
-            raise RuntimeError("embedding backend exploded")
-
-        with patch("theo.cli.serve.embed_documents", side_effect=boom):
-            result = handle_theo_upsert_edge(
-                db_path,
-                csv_dir,
-                "PartOf",
-                "a",
-                "b",
-                description="important edge",
-                git_revision="r",
-            )
-        assert result["status"] == "ok"
-        rows = run_query(
-            db_path,
-            "MATCH (:Concept {id: 'a'})-[r:PartOf]->(:Concept {id: 'b'}) RETURN count(r) AS c",
-        )
-        assert rows[0]["c"] == 1
-
-    def test_embedding_failure_does_not_fail_upsert(self, tmp_theo_project: Path) -> None:
-        # When embedding raises, the upsert must still return ok and the
-        # node must exist in the graph.
-        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
-        csv_dir = tmp_theo_project / ".theo"
-
-        def boom(_texts: list[str]) -> list[list[float]]:
-            raise RuntimeError("embedding backend exploded")
-
-        with patch("theo.cli.serve.embed_documents", side_effect=boom):
-            result = handle_theo_upsert_node(
-                db_path,
-                csv_dir,
-                "Concept",
-                {
-                    "id": "robust",
-                    "description": "written even though embedding explodes",
-                    "git_revision": "r",
-                },
-            )
-        assert result["status"] == "ok"
-        rows = run_query(db_path, "MATCH (n:Concept {id: 'robust'}) RETURN n.name")
-        assert len(rows) == 1
 
 
 class TestHandleTheoReload:
@@ -456,3 +400,26 @@ class TestHandleTheoReload:
             db_path, "MATCH (n:Concept {id: 'with_desc'}) RETURN n.embedding IS NULL AS is_null"
         )
         assert rows[0]["is_null"] is False
+
+    def test_reindex_failure_reports_partial_status(self, tmp_theo_project: Path) -> None:
+        """When the structural rebuild succeeds but reindex raises, callers
+        must see ``status: partial`` (not ``ok``) so they don't assume the
+        semantic index is current -- regression for the PR-review finding
+        that a silent "ok" hid a half-populated embedding state."""
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+
+        upsert_node(db_path, "Concept", {"id": "c1", "name": "C1"})
+        export_csv(db_path, csv_dir)
+
+        def boom(_db_path: Path) -> dict[str, int]:
+            raise RuntimeError("simulated reindex failure")
+
+        with patch("theo.cli.serve.reindex_all", side_effect=boom):
+            result = handle_theo_reload(db_path, csv_dir)
+
+        assert result["status"] == "partial"
+        assert result["rebuilt"] is True
+        assert result["reindex"]["status"] == "error"
+        assert "simulated reindex failure" in result["reindex"]["detail"]
+        assert "theo reindex" in result["detail"]

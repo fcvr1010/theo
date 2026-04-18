@@ -5,12 +5,25 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from theo._schema import EMBEDDING_DIM
+
 _log = logging.getLogger(__name__)
 
-# Canonical model name and output dimension.  Changing either requires
+# Re-export for modules that reach EMBEDDING_DIM via ``theo._embed``.
+__all__ = [
+    "EMBEDDING_DIM",
+    "MODEL_NAME",
+    "embed_documents",
+    "embed_query",
+    "make_edge_text",
+    "make_node_text",
+    "prewarm_model",
+    "reset_model",
+]
+
+# Canonical model name.  Changing it (or EMBEDDING_DIM in ``_schema``) requires
 # re-running ``theo reindex`` so all stored embeddings match.
 MODEL_NAME = "nomic-ai/nomic-embed-text-v1.5"
-EMBEDDING_DIM = 768
 
 # Nomic's embed-text models require task-specific prefixes prepended to the
 # input for the vectors to land in the right region of the space.
@@ -31,6 +44,17 @@ def _get_model() -> Any:
         _log.info("Loading embedding model %s (first call)", MODEL_NAME)
         _model = TextEmbedding(MODEL_NAME)
     return _model
+
+
+def prewarm_model() -> None:
+    """Force the embedding model to load now.
+
+    Intended for server startup: callers that do not want to pay the ~2 s
+    cold-start cost on the first user-facing operation can invoke this
+    during initialisation.  Propagates any load error so callers can decide
+    whether to log-and-continue or abort.
+    """
+    _get_model()
 
 
 def reset_model() -> None:

@@ -342,6 +342,42 @@ class TestExportAndRebuild:
         assert rows[0]["r.git_revision"] == "abc123"
 
 
+class TestRebuildFromCsvIsCrashSafe:
+    """``rebuild_from_csv`` must never destroy the live DB on failure.
+
+    Regression for the PR-review finding that the old implementation called
+    ``db_path.unlink()`` up-front and then ran COPY FROM: a bad CSV (or any
+    other mid-rebuild error) left the server with no DB at all.
+    """
+
+    def test_corrupt_csv_leaves_previous_db_intact(self, tmp_db: Path, tmp_path: Path) -> None:
+        # Seed the live DB with a recognisable row and export CSVs that
+        # match -- this is the "last known good" state.
+        upsert_node(tmp_db, "Concept", {"id": "survives", "name": "Survivor"})
+        csv_dir = tmp_path / "csvs"
+        export_csv(tmp_db, csv_dir)
+
+        # Corrupt one of the CSVs so the rebuild will raise during COPY.
+        (csv_dir / CSV_FILES["Concept"]).write_text(
+            "not,a,valid,concept,csv,row\nwith,too,many,columns,and,garbage\n"
+        )
+
+        import pytest
+
+        with pytest.raises(RuntimeError):
+            rebuild_from_csv(tmp_db, csv_dir)
+
+        # The previous DB must still be there and queryable; a fresh
+        # connection should still see the seeded row.
+        assert tmp_db.exists()
+        rows = run_query(tmp_db, "MATCH (n:Concept {id: 'survives'}) RETURN n.name")
+        assert rows and rows[0]["n.name"] == "Survivor"
+
+        # And the failed rebuild's tmp files must not leak.
+        leftovers = list(tmp_db.parent.glob(f"{tmp_db.name}.tmp.*"))
+        assert leftovers == [], f"unexpected tmp files left behind: {leftovers}"
+
+
 class TestGetStats:
     def test_returns_correct_counts(self, tmp_db: Path) -> None:
         upsert_node(tmp_db, "Concept", {"id": "a"})

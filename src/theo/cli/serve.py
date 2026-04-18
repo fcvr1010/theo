@@ -28,16 +28,8 @@ from theo._db import (
     semantic_search,
     upsert_edge,
     upsert_node,
-    write_edge_embedding,
-    write_node_embedding,
 )
-from theo._embed import (
-    _get_model,
-    embed_documents,
-    embed_query,
-    make_edge_text,
-    make_node_text,
-)
+from theo._embed import embed_query, prewarm_model
 from theo._git import find_theo_root, head_commit
 from theo._schema import CSV_FILES, EMBEDDABLE_TABLES, NODE_TABLES, PK_MAP, REL_TABLES
 
@@ -87,46 +79,13 @@ def _ensure_db(db_path: Path, csv_dir: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auto-indexing helpers
-#
-# Auto-index runs AFTER the COW commit + CSV export.  Embedding is a derived
-# cache, so failures must never roll back a successful upsert: we swallow
-# exceptions and log them.
-# ---------------------------------------------------------------------------
-
-
-def _auto_index_node(db_path: Path, table: str, properties: dict[str, Any]) -> None:
-    """Best-effort: embed the node's text fields and store the vector."""
-    text = make_node_text(properties.get("description"), properties.get("notes"))
-    if not text:
-        return
-    try:
-        vector = embed_documents([text])[0]
-        write_node_embedding(db_path, table, properties[PK_MAP[table]], vector)
-    except Exception:
-        _log.exception("Auto-index failed for %s %s", table, properties.get(PK_MAP[table]))
-
-
-def _auto_index_edge(
-    db_path: Path,
-    rel_type: str,
-    from_id: str,
-    to_id: str,
-    description: str | None,
-) -> None:
-    """Best-effort: embed the edge's description and store the vector."""
-    text = make_edge_text(description)
-    if not text:
-        return
-    try:
-        vector = embed_documents([text])[0]
-        write_edge_embedding(db_path, rel_type, from_id, to_id, vector)
-    except Exception:
-        _log.exception("Auto-index failed for %s %s->%s", rel_type, from_id, to_id)
-
-
-# ---------------------------------------------------------------------------
 # Tool handler functions (extracted for testability)
+#
+# Embeddings are NOT rebuilt on each upsert: a full model call + HNSW
+# drop/recreate per write is wasteful at scale and unnecessary when writes
+# come in batches.  The agent runs ``theo_reload`` (or the ``theo reindex``
+# CLI) after a batch of edits to refresh the semantic index, mirroring how
+# CSVs are flushed once per batch rather than once per row.
 # ---------------------------------------------------------------------------
 
 
@@ -229,12 +188,21 @@ def handle_theo_reload(db_path: Path, csv_dir: Path) -> dict[str, Any]:
     try:
         reindex_counts = reindex_all(db_path)
     except Exception as exc:
-        # The structural rebuild succeeded; only embeddings failed.
+        # Structural rebuild succeeded; only embeddings failed.  Surface
+        # "partial" (not "ok") so the agent does not assume search is
+        # current -- ``reindex_all`` nulls any half-populated column, so
+        # search results will be loudly empty rather than silently wrong
+        # until the agent retries ``theo_reload`` or runs ``theo reindex``.
         _log.exception("reindex_all failed after rebuild")
         return {
-            "status": "ok",
+            "status": "partial",
             "rebuilt": True,
             "reindex": {"status": "error", "detail": str(exc)},
+            "detail": (
+                "Structural rebuild succeeded but embedding reindex failed. "
+                "Run 'theo reindex' (or call theo_reload again) to refresh "
+                "the semantic index before relying on theo_search."
+            ),
             "stats": get_stats(db_path),
         }
 
@@ -271,7 +239,6 @@ def handle_theo_upsert_node(
             return result
         commit_write(tmp_path, db_path)
         export_csv(db_path, csv_dir)
-        _auto_index_node(db_path, table, properties)
         return {"status": "ok", "table": table, "id": properties[pk_field]}
     except Exception as exc:
         with contextlib.suppress(Exception):
@@ -311,7 +278,6 @@ def handle_theo_upsert_edge(
             return result
         commit_write(tmp_path, db_path)
         export_csv(db_path, csv_dir)
-        _auto_index_edge(db_path, rel_type, from_id, to_id, description)
         return {"status": "ok", "rel_type": rel_type, "from": from_id, "to": to_id}
     except Exception as exc:
         with contextlib.suppress(Exception):
@@ -393,10 +359,17 @@ def run(project_dir_str: str) -> None:
     config_path = Path(config["_root"]) / ".theo" / "config.json"
     _ensure_db(db_path, csv_dir)
 
-    # Pre-warm the embedding model so the first MCP write/search is not
-    # blocked ~2 s on cold-start model load.
-    with contextlib.suppress(Exception):
-        _get_model()
+    # Pre-warm the embedding model so the first ``theo_search`` call is not
+    # blocked ~2 s on cold-start model load.  A failure here (offline, bad
+    # proxy, corrupt model cache) leaves the server functional for
+    # non-embedding tools -- ``theo_stats`` / ``theo_query`` do not need the
+    # model -- so log loudly and continue rather than aborting startup.
+    try:
+        prewarm_model()
+    except Exception:
+        _log.exception(
+            "Failed to pre-warm embedding model; theo_search will error on invocation",
+        )
 
     mcp = FastMCP("theo")
 

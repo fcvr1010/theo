@@ -13,7 +13,7 @@ src/theo/cli/serve.py,serve.py,"The MCP server. Loads `.theo/config.json`, ensur
 
 `_ensure_db` both rebuilds from CSVs when the DB file is missing AND runs the idempotent embedding-column migration on every start — existing pre-semantic DBs gain the column without a full reload.
 
-Auto-indexing: `_auto_index_node` / `_auto_index_edge` run AFTER the COW commit and CSV export. They are best-effort and wrap embedding in a broad `try/except` so the graph write and CSVs persist even if fastembed fails. A missing fastembed install is logged once at WARNING then silenced at DEBUG. The embedding model is pre-warmed in `run()` so the first write isn't blocked on cold-start load.
+Embeddings are NOT rebuilt per-write: `handle_theo_upsert_*` and `handle_theo_delete_*` leave the semantic index stale. Callers refresh it by calling `handle_theo_reload` (MCP) or running the `theo reindex` CLI; batching amortises the HNSW drop/recreate cost. The fastembed model is pre-warmed in `run()` so the first `theo_search` isn't blocked on cold-start load; if pre-warm fails (offline, corrupt cache) the failure is logged at ERROR and the server continues -- non-embedding tools still work.
 
 `handle_theo_search` validates + clamps `top_k` ([1, 1000]) before it reaches Cypher's `LIMIT`, since that value is f-string-interpolated. The generic except branch returns `str(exc)` to the MCP client: acceptable today because transport is local stdio only; if this ever becomes networked, redact there and log the traceback internally.
 

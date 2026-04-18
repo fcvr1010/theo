@@ -308,3 +308,48 @@ class TestReindexAll:
             tmp_db, "MATCH (n:Concept {id: 'blank'}) RETURN n.embedding IS NULL AS is_null"
         )
         assert rows[0]["is_null"] is True
+
+    def test_mid_loop_failure_clears_column(self, tmp_db: Path) -> None:
+        """A SET failure mid-loop must leave the column consistently NULL.
+
+        Regression for the PR-review finding that a half-populated column
+        silently hid rows from the brute-force path (it filters on
+        ``embedding IS NOT NULL``), so search returned plausible but
+        incomplete results with no error signal.
+        """
+        from unittest.mock import patch
+
+        from theo import _db as db_module
+
+        # Seed three embeddable nodes; we want the 2nd SET to fail so the
+        # 1st would otherwise leave a lingering vector.
+        for pk in ("one", "two", "three"):
+            upsert_node(
+                tmp_db,
+                "Concept",
+                {"id": pk, "name": pk, "description": f"doc {pk}", "git_revision": "r"},
+            )
+
+        real_execute = db_module._execute
+        calls = {"set_count": 0}
+
+        def flaky_execute(conn, query, params=None):  # type: ignore[no-untyped-def]
+            if "SET n.embedding = $emb" in query:
+                calls["set_count"] += 1
+                if calls["set_count"] == 2:
+                    raise RuntimeError("simulated SET failure")
+            return real_execute(conn, query, params)
+
+        with (
+            patch.object(db_module, "_execute", side_effect=flaky_execute),
+            pytest.raises(RuntimeError, match="simulated SET failure"),
+        ):
+            reindex_all(tmp_db)
+
+        # Post-failure invariant: every Concept row has a NULL embedding.
+        # The table is "loudly empty" for search rather than "quietly wrong".
+        rows = run_query(
+            tmp_db,
+            "MATCH (n:Concept) RETURN n.id AS id, n.embedding IS NULL AS is_null ORDER BY id",
+        )
+        assert [r["is_null"] for r in rows] == [True, True, True], rows

@@ -62,7 +62,7 @@ Execute a read-only Cypher query against the knowledge graph.
 theo_search(query: str, table: str | None = None, top_k: int = 10) -> dict
 ```
 
-Semantic search over the knowledge graph. Embeds `query` with a local `nomic-embed-text-v1.5` model, ranks every `Concept`, `SourceFile`, and relationship by cosine similarity, and returns the top `top_k` matches.
+Semantic search over the knowledge graph. Embeds `query` with a local `nomic-embed-text-v1.5` model, ranks nodes and relationships across the embeddable tables by cosine similarity, and returns the top `top_k` matches overall (each table contributes its own top-k candidates, then results are merged and truncated).
 
 Prefer `theo_search` for free-text / intent queries ("how are writes atomic?", "where is authentication handled?"). Use `theo_query` when you want structural traversal or exact field filters.
 
@@ -84,7 +84,7 @@ Returns `{"status": "ok", "matches": [...]}` where each match follows a uniform 
 
 Node tables use an HNSW index for fast search when one exists and fall back to brute-force cosine similarity; relationship tables always use brute force.
 
-Embeddings live only in the runtime DB (never in CSVs). They are auto-maintained on `theo_upsert_node` / `theo_upsert_edge`, rebuilt on `theo reload`, and can be recomputed on demand with `theo reindex`.
+Embeddings live only in the runtime DB (never in CSVs). They are **not** recomputed per-write: upserts and deletes leave the semantic index stale until you call `theo_reload` (MCP) or `theo reindex` (CLI). After a batch of edits, call one of those to make the new content discoverable via `theo_search`.
 
 ## `theo_reload`
 
@@ -218,6 +218,8 @@ Before modifying any module, function, or file:
 # Post-change protocol
 
 Follow the "Updating/building the graph" procedure starting from the changeset.
+
+After a batch of graph edits, call `theo_reload` (or run `theo reindex` on the CLI) so `theo_search` reflects the new content -- embeddings are not rebuilt per-upsert.
 
 # Self-reflection protocol
 

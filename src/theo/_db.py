@@ -8,12 +8,14 @@ the real path or a temporary copy).
 from __future__ import annotations
 
 import contextlib
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
 import real_ladybug as lb
 
+from theo._cow import commit_write
 from theo._ext import load_vector_ext
 from theo._schema import (
     CSV_FILES,
@@ -290,6 +292,9 @@ def _hnsw_search_node(
     matches: list[dict[str, Any]] = []
     while result.has_next():
         row = _row(result)
+        # KuzuDB's HNSW cosine metric returns distance = 1 - cosine_similarity,
+        # so ``1 - distance`` puts HNSW scores on the same scale as the
+        # brute-force path's ``array_cosine_similarity`` output.
         matches.append(
             {
                 "kind": "node",
@@ -473,6 +478,15 @@ def reindex_all(db_path: Path) -> dict[str, int]:
         edge_vectors[rel_type] = embed_documents([t for _f, _t, t in rels]) if rels else []
 
     # Phase 3: single writer connection, drop-SET-create per node table.
+    #
+    # KuzuDB ``_execute`` calls auto-commit, so a mid-loop failure would
+    # otherwise leave the embedding column half-populated -- and because the
+    # brute-force path filters ``WHERE embedding IS NOT NULL`` that state is
+    # invisible: search silently returns incomplete results.  On any failure
+    # we null the column for the affected table/rel so the post-failure state
+    # is "no embeddings for this table" (loudly empty) rather than "some
+    # embeddings" (quietly wrong).  A retry re-embeds from scratch, which is
+    # cheap enough at this scale.
     counts: dict[str, int] = {}
     with _opened(db_path) as conn:
         for table in NODE_TABLES:
@@ -481,12 +495,17 @@ def reindex_all(db_path: Path) -> dict[str, int]:
             pk_field = PK_MAP[table]
             _drop_vector_index(conn, table)
             try:
-                for (pk_value, _text), vec in zip(rows, vectors, strict=True):
-                    _execute(
-                        conn,
-                        f"MATCH (n:{table} {{{pk_field}: $pk}}) SET n.embedding = $emb",
-                        {"pk": pk_value, "emb": vec},
-                    )
+                try:
+                    for (pk_value, _text), vec in zip(rows, vectors, strict=True):
+                        _execute(
+                            conn,
+                            f"MATCH (n:{table} {{{pk_field}: $pk}}) SET n.embedding = $emb",
+                            {"pk": pk_value, "emb": vec},
+                        )
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        _execute(conn, f"MATCH (n:{table}) SET n.embedding = NULL")
+                    raise
             finally:
                 # Always recreate the index, even if SET raised partway through;
                 # otherwise the table would be left indexless until the next
@@ -501,15 +520,24 @@ def reindex_all(db_path: Path) -> dict[str, int]:
             from_table, to_table = REL_ENDPOINTS[rel_type]
             from_pk = PK_MAP[from_table]
             to_pk = PK_MAP[to_table]
-            for (f_id, t_id, _text), vec in zip(rels, vectors, strict=True):
-                _execute(
-                    conn,
-                    f"MATCH (a:{from_table} {{{from_pk}: $from_id}})"
-                    f"-[r:{rel_type}]->"
-                    f"(b:{to_table} {{{to_pk}: $to_id}}) "
-                    "SET r.embedding = $emb",
-                    {"from_id": f_id, "to_id": t_id, "emb": vec},
-                )
+            try:
+                for (f_id, t_id, _text), vec in zip(rels, vectors, strict=True):
+                    _execute(
+                        conn,
+                        f"MATCH (a:{from_table} {{{from_pk}: $from_id}})"
+                        f"-[r:{rel_type}]->"
+                        f"(b:{to_table} {{{to_pk}: $to_id}}) "
+                        "SET r.embedding = $emb",
+                        {"from_id": f_id, "to_id": t_id, "emb": vec},
+                    )
+            except Exception:
+                with contextlib.suppress(Exception):
+                    _execute(
+                        conn,
+                        f"MATCH (a:{from_table})-[r:{rel_type}]->(b:{to_table}) "
+                        "SET r.embedding = NULL",
+                    )
+                raise
             counts[rel_type] = len(rels)
 
     return counts
@@ -807,39 +835,47 @@ def export_csv(db_path: Path, csv_dir: Path) -> None:
 def rebuild_from_csv(db_path: Path, csv_dir: Path) -> None:
     """Rebuild KuzuDB from CSV files.
 
-    Drops the existing database (by deleting the file), re-creates the schema,
-    and imports all CSVs.  Node tables are imported first, then relationships.
+    Builds a fresh DB at a temporary path, imports all CSVs into it, and then
+    atomically swaps it in for ``db_path``.  The live DB is only replaced on
+    success -- a corrupt CSV or mid-rebuild crash leaves the previous good
+    DB (if any) untouched and the tmp file is cleaned up.  This mirrors the
+    COW pattern used by single-row write handlers, and is especially
+    important for ``handle_theo_reload`` which runs inside a long-lived MCP
+    server that may be concurrently serving reads.
     """
-    # Remove existing DB
-    if db_path.exists():
-        db_path.unlink()
-    wal = Path(str(db_path) + ".wal")
-    if wal.exists():
-        wal.unlink()
+    tmp_path = db_path.parent / f"{db_path.name}.tmp.{uuid.uuid4().hex}"
+    tmp_wal = Path(str(tmp_path) + ".wal")
+    try:
+        init_schema(tmp_path)
+        # Fresh schemas already carry the embedding column via DDL; this extra
+        # migration call is a no-op there but keeps the helper as a single
+        # reliable entry point for older DBs encountered elsewhere.
+        migrate_embedding_column(tmp_path)
 
-    init_schema(db_path)
-    # Fresh schemas already carry the embedding column via DDL; this extra
-    # migration call is a no-op there but keeps the helper as a single
-    # reliable entry point for older DBs encountered elsewhere.
-    migrate_embedding_column(db_path)
+        with _opened(tmp_path) as conn:
+            # Import node tables.  CSV does not contain the derived
+            # ``embedding`` column, so list the populated columns explicitly;
+            # KuzuDB would otherwise expect one value per DDL column.
+            for table in NODE_TABLES:
+                csv_path = csv_dir / CSV_FILES[table]
+                if csv_path.exists() and csv_path.stat().st_size > 0:
+                    col_list = ", ".join(NODE_COLUMNS[table])
+                    _execute(conn, f"COPY {table}({col_list}) FROM '{csv_path}'")
 
-    with _opened(db_path) as conn:
-        # Import node tables.  CSV does not contain the derived ``embedding``
-        # column, so list the populated columns explicitly; KuzuDB would
-        # otherwise expect one value per DDL column.
-        for table in NODE_TABLES:
-            csv_path = csv_dir / CSV_FILES[table]
-            if csv_path.exists() and csv_path.stat().st_size > 0:
-                col_list = ", ".join(NODE_COLUMNS[table])
-                _execute(conn, f"COPY {table}({col_list}) FROM '{csv_path}'")
+            # Import relationship tables.  For REL COPY, endpoint keys are
+            # implicit in the first two CSV columns; we only list the
+            # non-endpoint props we actually exported (description,
+            # git_revision -- never embedding).
+            for rel in REL_TABLES:
+                csv_path = csv_dir / CSV_FILES[rel]
+                if csv_path.exists() and csv_path.stat().st_size > 0:
+                    _execute(conn, f"COPY {rel}(description, git_revision) FROM '{csv_path}'")
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        tmp_wal.unlink(missing_ok=True)
+        raise
 
-        # Import relationship tables.  For REL COPY, endpoint keys are implicit
-        # in the first two CSV columns; we only list the non-endpoint props we
-        # actually exported (description, git_revision -- never embedding).
-        for rel in REL_TABLES:
-            csv_path = csv_dir / CSV_FILES[rel]
-            if csv_path.exists() and csv_path.stat().st_size > 0:
-                _execute(conn, f"COPY {rel}(description, git_revision) FROM '{csv_path}'")
+    commit_write(tmp_path, db_path)
 
 
 def get_stats(db_path: Path) -> dict[str, Any]:

@@ -1,4 +1,4 @@
-mcp_interface,semantic_layer,serve.py exposes `theo_search` and auto-indexes every `theo_upsert_node` / `theo_upsert_edge` via `_auto_index_*` helpers; pre-warms the fastembed model at startup.,3836673
+mcp_interface,semantic_layer,serve.py exposes `theo_search` and pre-warms the fastembed model at startup; upserts leave embeddings stale and callers rebuild them via `theo_reload` or `theo reindex`.,3836673
 mcp_interface,project_init,"MCP server reads the config.json layout that project_init writes; both must agree on db_path, CSV locations, and registration format",c47921d18e3b269886d0d301a746bc937c5dff2c
 mcp_interface,skills_bundle,SKILL.md documents the exact MCP tool surface; a drift between the two silently misguides coding agents,c47921d18e3b269886d0d301a746bc937c5dff2c
 cli_commands,semantic_layer,`theo reindex` recomputes all embeddings; `theo reload` reruns `reindex_all` after rebuilding from CSVs so search is usable immediately after a reload.,3836673

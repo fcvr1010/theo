@@ -44,10 +44,12 @@ def run(project_dir_str: str) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     rebuild_from_csv(db_path, csv_dir)
 
-    typer.echo("Reindexing embeddings...")
     counts = reindex_all(db_path)
-    for table, n in counts.items():
-        typer.echo(f"  {table:20s} {n:>6d}")
+    if any(n > 0 for n in counts.values()):
+        typer.echo("Reindexed embeddings:")
+        for table, n in counts.items():
+            if n > 0:
+                typer.echo(f"  {table:20s} {n:>6d}")
 
     stats = get_stats(db_path)
     typer.echo(f"Reloaded {db_path} from CSVs in {csv_dir}.")

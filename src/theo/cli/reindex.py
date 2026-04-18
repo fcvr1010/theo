@@ -1,9 +1,9 @@
 """``theo reindex`` -- recompute semantic embeddings for every node and edge.
 
-Useful when:
-- Switching the embedding model (indexes need rebuilding).
-- Auto-index was disabled or failed for a batch of writes.
-- Migrating an older DB that had no ``embedding`` column.
+Run this after a batch of ``theo_upsert_node`` / ``theo_upsert_edge`` calls
+to refresh the semantic index -- upserts do not embed on write.  Also the
+right entry point when switching embedding models, or migrating an older DB
+that had no ``embedding`` column.
 """
 
 from __future__ import annotations
@@ -29,7 +29,11 @@ def run(project_dir_str: str) -> None:
     config = json.loads(config_path.read_text())
     db_path = root / config["db_path"]
     if not db_path.exists():
-        typer.echo(f"Error: database not found at {db_path}. Run 'theo use' first.", err=True)
+        typer.echo(
+            f"Error: database not found at {db_path}. "
+            "Run 'theo use' to initialise, or 'theo reload' to rebuild from CSVs.",
+            err=True,
+        )
         raise typer.Exit(1)
 
     # Guarantee the embedding column exists on older DBs.
