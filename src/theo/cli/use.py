@@ -27,9 +27,8 @@ def _write_skill_files(dest_dir: Path) -> None:
 
 def _find_theo_executable() -> list[str]:
     """Return the command list for the ``theo`` executable."""
-    exe = shutil.which("theo")
-    if exe:
-        return [exe]
+    if shutil.which("theo"):
+        return ["theo"]
     return [sys.executable, "-m", "theo.cli.main"]
 
 
