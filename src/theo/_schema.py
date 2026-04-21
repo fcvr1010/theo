@@ -9,6 +9,16 @@ from __future__ import annotations
 NODE_TABLES: list[str] = ["Concept", "SourceFile"]
 REL_TABLES: list[str] = ["PartOf", "BelongsTo", "InteractsWith", "DependsOn", "Imports"]
 
+# Embedding configuration.  Every table in EMBEDDABLE_TABLES carries an
+# ``embedding FLOAT[EMBEDDING_DIM]`` column (populated outside CSV).
+#
+# HNSW vector indexes are a node-table feature in KuzuDB; relationship
+# embeddings are searched via brute-force cosine similarity only.  Hence
+# ``HNSW_INDEX_NAMES`` only covers node tables.
+EMBEDDING_DIM: int = 768
+EMBEDDABLE_TABLES: list[str] = NODE_TABLES + REL_TABLES
+HNSW_INDEX_NAMES: dict[str, str] = {t: f"{t.lower()}_emb_idx" for t in NODE_TABLES}
+
 # Primary keys for each node table
 PK_MAP: dict[str, str] = {
     "Concept": "id",
@@ -89,7 +99,9 @@ NODE_COLUMNS: dict[str, list[str]] = {
     "SourceFile": SOURCE_FILE_COLUMNS,
 }
 
-# DDL for creating node tables
+# DDL for creating node tables.  The ``embedding FLOAT[768]`` column is
+# populated only in-memory (never exported to CSV): it is derived from
+# ``description`` / ``notes`` and rebuilt by ``theo reload`` / ``theo reindex``.
 NODE_DDL: dict[str, str] = {
     "Concept": (
         "CREATE NODE TABLE Concept("
@@ -98,7 +110,8 @@ NODE_DDL: dict[str, str] = {
         "level INT32, "
         "description STRING, "
         "notes STRING, "
-        "git_revision STRING)"
+        "git_revision STRING, "
+        f"embedding FLOAT[{EMBEDDING_DIM}])"
     ),
     "SourceFile": (
         "CREATE NODE TABLE SourceFile("
@@ -106,29 +119,32 @@ NODE_DDL: dict[str, str] = {
         "name STRING, "
         "description STRING, "
         "notes STRING, "
-        "git_revision STRING)"
+        "git_revision STRING, "
+        f"embedding FLOAT[{EMBEDDING_DIM}])"
     ),
 }
 
-# DDL for creating relationship tables
+# DDL for creating relationship tables.  Relationship embeddings encode just
+# ``description`` (rel tables have no ``notes`` today).
 REL_DDL: dict[str, str] = {
     "PartOf": (
-        "CREATE REL TABLE PartOf(FROM Concept TO Concept, description STRING, git_revision STRING)"
+        "CREATE REL TABLE PartOf(FROM Concept TO Concept, "
+        f"description STRING, git_revision STRING, embedding FLOAT[{EMBEDDING_DIM}])"
     ),
     "BelongsTo": (
-        "CREATE REL TABLE BelongsTo("
-        "FROM SourceFile TO Concept, description STRING, git_revision STRING)"
+        "CREATE REL TABLE BelongsTo(FROM SourceFile TO Concept, "
+        f"description STRING, git_revision STRING, embedding FLOAT[{EMBEDDING_DIM}])"
     ),
     "InteractsWith": (
-        "CREATE REL TABLE InteractsWith("
-        "FROM Concept TO Concept, description STRING, git_revision STRING)"
+        "CREATE REL TABLE InteractsWith(FROM Concept TO Concept, "
+        f"description STRING, git_revision STRING, embedding FLOAT[{EMBEDDING_DIM}])"
     ),
     "DependsOn": (
-        "CREATE REL TABLE DependsOn("
-        "FROM Concept TO Concept, description STRING, git_revision STRING)"
+        "CREATE REL TABLE DependsOn(FROM Concept TO Concept, "
+        f"description STRING, git_revision STRING, embedding FLOAT[{EMBEDDING_DIM}])"
     ),
     "Imports": (
-        "CREATE REL TABLE Imports("
-        "FROM SourceFile TO SourceFile, description STRING, git_revision STRING)"
+        "CREATE REL TABLE Imports(FROM SourceFile TO SourceFile, "
+        f"description STRING, git_revision STRING, embedding FLOAT[{EMBEDDING_DIM}])"
     ),
 }

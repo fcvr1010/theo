@@ -56,6 +56,46 @@ theo_query(cypher: str) -> list[dict]
 
 Execute a read-only Cypher query against the knowledge graph.
 
+## `theo_search`
+
+```
+theo_search(query: str, table: str | None = None, top_k: int = 10) -> dict
+```
+
+Semantic search over the knowledge graph. Embeds `query` with a local `nomic-embed-text-v1.5` model, ranks nodes and relationships across the embeddable tables by cosine similarity, and returns the top `top_k` matches overall (each table contributes its own top-k candidates, then results are merged and truncated).
+
+Prefer `theo_search` for free-text / intent queries ("how are writes atomic?", "where is authentication handled?"). Use `theo_query` when you want structural traversal or exact field filters.
+
+`table` optionally restricts to one of `Concept`, `SourceFile`, `PartOf`, `BelongsTo`, `InteractsWith`, `DependsOn`, `Imports`. Pass `None` (or omit) to search all embeddable tables.
+
+Returns `{"status": "ok", "matches": [...]}` where each match follows a uniform shape:
+
+```
+{
+  "kind": "node" | "edge",
+  "table": "<node table>"        # when kind == "node"
+  "rel_type": "<rel table>"      # when kind == "edge"
+  "score": float,
+  "description": str,
+  "ref": {"id": str, "name": str}                 # when kind == "node"
+       | {"from_id": str, "to_id": str}           # when kind == "edge"
+}
+```
+
+Node tables use an HNSW index for fast search when one exists and fall back to brute-force cosine similarity; relationship tables always use brute force.
+
+Embeddings live only in the runtime DB (never in CSVs). They are **not** recomputed per-write: upserts and deletes leave the semantic index stale until you call `theo_reload` (MCP) or `theo reindex` (CLI). After a batch of edits, call one of those to make the new content discoverable via `theo_search`.
+
+## `theo_reload`
+
+```
+theo_reload() -> dict
+```
+
+Rebuild the runtime DB from the on-disk `.theo/*.csv` files. Use after pulling git changes that touched the CSVs, or after editing them by hand. Runs in-process so no external process races with the MCP server for DB access.
+
+Embeddings are recomputed automatically so `theo_search` is usable immediately afterwards. Returns `{"status": "ok", "rebuilt": true, "reindex": {...}, "stats": {...}}`.
+
 ## `theo_upsert_node`
 
 ```
@@ -120,13 +160,13 @@ While creating nodes, fill in their `description` with a paragraph about what th
 
 Build relationships between nodes as you go.
 
-Then, operate as an **Interface Designer** on all modified nodes. Ask yourself, what can we learn about API contracts, public interface, protocol design and document your findings into the appropriate `notes`. Build needed relationships between nodes as you go.
+Then, operate as an **Interface Designer** on all modified nodes. Ask yourself, what can we learn about API contracts, public interface, protocol design and document your findings into the appropriate `notes`. Build additional relationships as needed.
 
-Then, operate as a **Dependency Master** on all modified nodes. Ask yourself, what subtle dependencies exist between components. If we change something in A, what breaks in B? Any performance impact in C from a change of the order of an operation in D? Any circular dep? Any unnecessary coupling? Document your finding into the appropriate `notes`. Build needed relationships between nodes as you go.
+Then, operate as a **Dependency Master** on all modified nodes. Ask yourself, what subtle dependencies exist between components. If we change something in A, what breaks in B? Any performance impact in C from a change of the order of an operation in D? Any circular dep? Any unnecessary coupling? Document your finding into the appropriate `notes`. Build additional relationships as needed.
 
-Then, operate as a **Criticality Finder**. Take an overall look and judge: what are the critical paths we should be aware of? Any single points of failure? Any code smells? Any bad design patterns? Document your finding into the appropriate `notes`. Build needed relationships between nodes as you go.
+Then, operate as a **Criticality Finder**. Take an overall look and judge: what are the critical paths we should be aware of? Any single points of failure? Any code smells? Any bad design patterns? Document your finding into the appropriate `notes`. Build additional relationships as needed.
 
-Finally, operate as a **Simplicity Advocate**. Think about complexity reduction, dead code removal, over-engineering smells. Anything that you see and that could be changed to make the code better? Document your finding into the appropriate `notes`. Build needed relationships between nodes as you go.
+Finally, operate as a **Simplicity Advocate**. Think about complexity reduction, dead code removal, over-engineering smells. Anything that you see and that could be changed to make the code better? Document your finding into the appropriate `notes`. Build additional relationships as needed.
 
 After major modifications to a node, evaluate its parents, descendants, and peers for impact. Update them as needed, using the same "lenses" (architect, criticality finder, simplicity advocate, etc.)
 
@@ -156,9 +196,19 @@ When updating nodes, do not stack notes after notes, re-evaluate the entire cont
 
 `notes` are not meant to be a git diff summary. Never store things like "Version abc5g added this parameter" or "Name of the parameter change to X in version 95msgl". `notes` capture conceptual, non-trivial aspects in a succinct way.
 
+## No embedded newlines in notes
+
+Never write `\n` or multi-line strings in `description` or `notes` fields. The CSVs are exported as headerless files and KuzuDB's parallel CSV reader does not support quoted newlines -- an embedded newline causes `theo_reload` to fail. Keep all field values on a single logical line, using prose flow (`.`, `;`, ` -- `) to separate thoughts instead of line breaks.
+
 ## No endless nitpicky updates
 
 The point of the semantic analysis is NOT to document every little, irrelevant detail. Do not iterate forever updating notes. Judge whether something meaningful warrants an update. If there's nothing, it's fine to say so and move on.
+
+# Exploration protocol
+
+Whenever you need to explore the codebase, start by querying for any nodes or relationship that match your search criteria. Use `theo_search` for free-text / intent queries ("how are writes atomic?", "what handles authentication?") and `theo_query` for structural Cypher traversal. Explore the matches' `notes`, and explore their neighbors. Iterate as needed.
+
+This needs not replace direct grep or source code reading, but it can inform such process enormously and make you aware of the tricky bits that are easy to miss.
 
 # Query-before-act protocol
 
@@ -172,6 +222,12 @@ Before modifying any module, function, or file:
 # Post-change protocol
 
 Follow the "Updating/building the graph" procedure starting from the changeset.
+
+After a batch of graph edits, call `theo_reload` (or run `theo reindex` on the CLI) so `theo_search` reflects the new content -- embeddings are not rebuilt per-upsert.
+
+# Self-reflection protocol
+
+After any major exploration of the codebase, ask yourself if you learned anything new about the nodes or their relationship, anything worth tracking for the future. In case, update the graph accordingly.
 
 # Structural coherence
 

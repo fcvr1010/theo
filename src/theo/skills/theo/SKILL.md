@@ -56,6 +56,46 @@ theo_query(cypher: str) -> list[dict]
 
 Execute a read-only Cypher query against the knowledge graph.
 
+## `theo_search`
+
+```
+theo_search(query: str, table: str | None = None, top_k: int = 10) -> dict
+```
+
+Semantic search over the knowledge graph. Embeds `query` with a local `nomic-embed-text-v1.5` model, ranks nodes and relationships across the embeddable tables by cosine similarity, and returns the top `top_k` matches overall (each table contributes its own top-k candidates, then results are merged and truncated).
+
+Prefer `theo_search` for free-text / intent queries ("how are writes atomic?", "where is authentication handled?"). Use `theo_query` when you want structural traversal or exact field filters.
+
+`table` optionally restricts to one of `Concept`, `SourceFile`, `PartOf`, `BelongsTo`, `InteractsWith`, `DependsOn`, `Imports`. Pass `None` (or omit) to search all embeddable tables.
+
+Returns `{"status": "ok", "matches": [...]}` where each match follows a uniform shape:
+
+```
+{
+  "kind": "node" | "edge",
+  "table": "<node table>"        # when kind == "node"
+  "rel_type": "<rel table>"      # when kind == "edge"
+  "score": float,
+  "description": str,
+  "ref": {"id": str, "name": str}                 # when kind == "node"
+       | {"from_id": str, "to_id": str}           # when kind == "edge"
+}
+```
+
+Node tables use an HNSW index for fast search when one exists and fall back to brute-force cosine similarity; relationship tables always use brute force.
+
+Embeddings live only in the runtime DB (never in CSVs). They are **not** recomputed per-write: upserts and deletes leave the semantic index stale until you call `theo_reload` (MCP) or `theo reindex` (CLI). After a batch of edits, call one of those to make the new content discoverable via `theo_search`.
+
+## `theo_reload`
+
+```
+theo_reload() -> dict
+```
+
+Rebuild the runtime DB from the on-disk `.theo/*.csv` files. Use after pulling git changes that touched the CSVs, or after editing them by hand. Runs in-process so no external process races with the MCP server for DB access.
+
+Embeddings are recomputed automatically so `theo_search` is usable immediately afterwards. Returns `{"status": "ok", "rebuilt": true, "reindex": {...}, "stats": {...}}`.
+
 ## `theo_upsert_node`
 
 ```
@@ -162,7 +202,7 @@ The point of the semantic analysis is NOT to document every little, irrelevant d
 
 # Exploration protocol
 
-Whenever you need to explore the codebase, start by querying for any nodes or relationship that match your search criteria. Explore their notes, and explore their neighbors. Iterate as needed.
+Whenever you need to explore the codebase, start by querying for any nodes or relationship that match your search criteria. Use `theo_search` for free-text / intent queries ("how are writes atomic?", "what handles authentication?") and `theo_query` for structural Cypher traversal. Explore the matches' `notes`, and explore their neighbors. Iterate as needed.
 
 This needs not replace direct grep or source code reading, but it can inform such process enormously and make you aware of the tricky bits that are easy to miss.
 
@@ -178,6 +218,8 @@ Before modifying any module, function, or file:
 # Post-change protocol
 
 Follow the "Updating/building the graph" procedure starting from the changeset.
+
+After a batch of graph edits, call `theo_reload` (or run `theo reindex` on the CLI) so `theo_search` reflects the new content -- embeddings are not rebuilt per-upsert.
 
 # Self-reflection protocol
 
