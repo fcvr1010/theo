@@ -11,7 +11,7 @@ from theo._db import init_schema
 from theo._schema import CSV_FILES
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def tmp_db(tmp_path: Path) -> Path:
     """Create a fresh KuzuDB with Theo schema in a temp directory."""
     db_path = tmp_path / "theo.db"
@@ -19,7 +19,7 @@ def tmp_db(tmp_path: Path) -> Path:
     return db_path
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def tmp_theo_project(tmp_path: Path) -> Path:
     """Create a minimal .theo/ project structure with DB and config."""
     theo_dir = tmp_path / ".theo"

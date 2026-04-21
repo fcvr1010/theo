@@ -8,39 +8,28 @@ that had no ``embedding`` column.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import typer
 
 from theo._db import migrate_embedding_column, reindex_all
-from theo._git import find_theo_root
+from theo.cli._common import load_project
 
 
 def run(project_dir_str: str) -> None:
     """Rebuild embeddings for the project at *project_dir_str*."""
-    project_dir = Path(project_dir_str).resolve()
-    root = find_theo_root(project_dir)
-    if root is None:
-        typer.echo("Error: no .theo/config.json found (searched upward).", err=True)
-        raise typer.Exit(1)
-
-    config_path = root / ".theo" / "config.json"
-    config = json.loads(config_path.read_text())
-    db_path = root / config["db_path"]
-    if not db_path.exists():
+    project = load_project(project_dir_str)
+    if not project.db_path.exists():
         typer.echo(
-            f"Error: database not found at {db_path}. "
+            f"Error: database not found at {project.db_path}. "
             "Run 'theo use' to initialise, or 'theo reload' to rebuild from CSVs.",
             err=True,
         )
         raise typer.Exit(1)
 
     # Guarantee the embedding column exists on older DBs.
-    migrate_embedding_column(db_path)
+    migrate_embedding_column(project.db_path)
 
     typer.echo("Reindexing embeddings...")
-    counts = reindex_all(db_path)
+    counts = reindex_all(project.db_path)
     typer.echo("")
     typer.echo("Per-table counts:")
     for table, n in counts.items():

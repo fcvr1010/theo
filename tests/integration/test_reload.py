@@ -65,7 +65,7 @@ class TestReload:
         with pytest.raises(click.exceptions.Exit):
             run(str(tmp_theo_project))
 
-    @pytest.mark.integration  # type: ignore[misc]
+    @pytest.mark.integration
     def test_reload_rebuilds_embeddings(self, tmp_theo_project: Path) -> None:
         pytest.importorskip("fastembed")
         db_path = tmp_theo_project / ".theo" / "db" / "theo.db"

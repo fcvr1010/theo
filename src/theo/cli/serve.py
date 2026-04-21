@@ -10,10 +10,9 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-
-import typer
 
 from theo._cow import abort_write, begin_write, commit_write
 from theo._db import (
@@ -21,7 +20,6 @@ from theo._db import (
     delete_node,
     export_csv,
     get_stats,
-    migrate_embedding_column,
     rebuild_from_csv,
     reindex_all,
     run_query,
@@ -30,52 +28,42 @@ from theo._db import (
     upsert_node,
 )
 from theo._embed import embed_query, prewarm_model
-from theo._git import find_theo_root, head_commit
-from theo._schema import CSV_FILES, EMBEDDABLE_TABLES, NODE_TABLES, PK_MAP, REL_TABLES
+from theo._git import head_commit
+from theo._schema import CSV_FILES, EMBEDDABLE_TABLES, NODE_TABLES
+from theo.cli._common import ensure_db, load_project
 
 _log = logging.getLogger(__name__)
 
 
-def _load_config(project_dir: Path) -> dict[str, Any]:
-    """Find and load ``.theo/config.json``, searching upward from *project_dir*."""
-    root = find_theo_root(project_dir)
-    if root is None:
-        typer.echo("Error: no .theo/config.json found (searched upward).", err=True)
-        raise typer.Exit(1)
-    config_path = root / ".theo" / "config.json"
-    return {**json.loads(config_path.read_text()), "_root": str(root)}
+def _run_write(
+    db_path: Path,
+    csv_dir: Path,
+    op: Callable[[Path], dict[str, Any]],
+) -> dict[str, Any]:
+    """Run a single write ``op`` inside the standard COW → export lifecycle.
 
+    ``op`` receives the temporary DB path and returns the status-dict shape
+    that every ``_db.py`` write primitive already uses.  Structured errors
+    from ``op`` roll back the temporary DB; unexpected exceptions are
+    captured and also roll back, so the on-disk DB is never left half-written.
 
-def _resolve_paths(config: dict[str, Any]) -> tuple[Path, Path]:
-    """Return (db_path, csv_dir) resolved from config."""
-    root = Path(config["_root"])
-    db_path = root / config["db_path"]
-    csv_dir = root / ".theo"
-    return db_path, csv_dir
-
-
-def _ensure_db(db_path: Path, csv_dir: Path) -> None:
-    """Rebuild the DB from CSVs if the DB is missing but CSVs exist.
-
-    Also runs the idempotent embedding-column migration so older DBs gain the
-    semantic column without a full rebuild.
+    Consolidating this here means validation (tables, PKs, missing endpoints)
+    lives exactly once — in the ``_db.py`` primitive — and the MCP handlers
+    stay thin: COW bookkeeping and CSV export, nothing else.
     """
-    if not db_path.exists():
-        required_csvs = [CSV_FILES[t] for t in NODE_TABLES]
-        has_csvs = any(
-            (csv_dir / f).exists() and (csv_dir / f).stat().st_size > 0 for f in required_csvs
-        )
-        if has_csvs:
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            rebuild_from_csv(db_path, csv_dir)
-        else:
-            typer.echo(
-                "Error: database not found and no CSV data to rebuild from.",
-                err=True,
-            )
-            raise typer.Exit(1)
-
-    migrate_embedding_column(db_path)
+    tmp_path = begin_write(db_path)
+    try:
+        result = op(tmp_path)
+        if result["status"] == "error":
+            abort_write(tmp_path)
+            return result
+        commit_write(tmp_path, db_path)
+        export_csv(db_path, csv_dir)
+        return result
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            abort_write(tmp_path)
+        return {"status": "error", "detail": str(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -135,9 +123,10 @@ def handle_theo_search(
     invalid or the underlying query fails.
     """
     if table is not None and table not in EMBEDDABLE_TABLES:
+        allowed = ", ".join(EMBEDDABLE_TABLES)
         return {
             "status": "error",
-            "detail": f"Invalid table: {table}. Must be one of {EMBEDDABLE_TABLES} or null.",
+            "detail": f"Invalid table: {table}. Must be one of {allowed} or null.",
         }
     # ``top_k`` arrives from MCP as user-controlled input, and is interpolated
     # into Cypher's ``LIMIT``.  Coerce + clamp so malformed values fail cleanly
@@ -220,30 +209,12 @@ def handle_theo_upsert_node(
     table: str,
     properties: dict[str, Any],
 ) -> dict[str, Any]:
-    """Upsert a node (COW -> export CSV)."""
-    if table not in NODE_TABLES:
-        return {
-            "status": "error",
-            "detail": f"Invalid table: {table}. Must be one of {NODE_TABLES}",
-        }
+    """Upsert a node (COW -> export CSV).
 
-    pk_field = PK_MAP[table]
-    if pk_field not in properties:
-        return {"status": "error", "detail": f"Missing primary key field '{pk_field}'"}
-
-    tmp_path = begin_write(db_path)
-    try:
-        result = upsert_node(tmp_path, table, properties)
-        if result["status"] == "error":
-            abort_write(tmp_path)
-            return result
-        commit_write(tmp_path, db_path)
-        export_csv(db_path, csv_dir)
-        return {"status": "ok", "table": table, "id": properties[pk_field]}
-    except Exception as exc:
-        with contextlib.suppress(Exception):
-            abort_write(tmp_path)
-        return {"status": "error", "detail": str(exc)}
+    Table / PK / field validation is the responsibility of ``upsert_node`` —
+    its structured errors are forwarded verbatim.
+    """
+    return _run_write(db_path, csv_dir, lambda tmp: upsert_node(tmp, table, properties))
 
 
 def handle_theo_upsert_edge(
@@ -256,33 +227,17 @@ def handle_theo_upsert_edge(
     *,
     git_revision: str,
 ) -> dict[str, Any]:
-    """Upsert a relationship (COW -> export CSV)."""
-    if rel_type not in REL_TABLES:
-        return {
-            "status": "error",
-            "detail": f"Invalid relationship type: {rel_type}. Must be one of {REL_TABLES}",
-        }
+    """Upsert a relationship (COW -> export CSV).
 
-    tmp_path = begin_write(db_path)
-    try:
-        result = upsert_edge(
-            tmp_path,
-            rel_type,
-            from_id,
-            to_id,
-            description,
-            git_revision=git_revision,
-        )
-        if result["status"] == "error":
-            abort_write(tmp_path)
-            return result
-        commit_write(tmp_path, db_path)
-        export_csv(db_path, csv_dir)
-        return {"status": "ok", "rel_type": rel_type, "from": from_id, "to": to_id}
-    except Exception as exc:
-        with contextlib.suppress(Exception):
-            abort_write(tmp_path)
-        return {"status": "error", "detail": str(exc)}
+    Rel-type and endpoint-existence validation is owned by ``upsert_edge``.
+    """
+    return _run_write(
+        db_path,
+        csv_dir,
+        lambda tmp: upsert_edge(
+            tmp, rel_type, from_id, to_id, description, git_revision=git_revision
+        ),
+    )
 
 
 def handle_theo_delete_node(
@@ -293,26 +248,12 @@ def handle_theo_delete_node(
     *,
     detach: bool = False,
 ) -> dict[str, Any]:
-    """Delete a node (COW -> export CSV)."""
-    if table not in NODE_TABLES:
-        return {
-            "status": "error",
-            "detail": f"Invalid table: {table}. Must be one of {NODE_TABLES}",
-        }
+    """Delete a node (COW -> export CSV).
 
-    tmp_path = begin_write(db_path)
-    try:
-        result = delete_node(tmp_path, table, id, detach=detach)
-        if result["status"] == "error":
-            abort_write(tmp_path)
-            return result
-        commit_write(tmp_path, db_path)
-        export_csv(db_path, csv_dir)
-        return result
-    except Exception as exc:
-        with contextlib.suppress(Exception):
-            abort_write(tmp_path)
-        return {"status": "error", "detail": str(exc)}
+    Table / not-found / referential-integrity errors are produced by
+    ``delete_node`` and surfaced unchanged.
+    """
+    return _run_write(db_path, csv_dir, lambda tmp: delete_node(tmp, table, id, detach=detach))
 
 
 def handle_theo_delete_edge(
@@ -322,26 +263,11 @@ def handle_theo_delete_edge(
     from_id: str,
     to_id: str,
 ) -> dict[str, Any]:
-    """Delete a relationship (COW -> export CSV)."""
-    if rel_type not in REL_TABLES:
-        return {
-            "status": "error",
-            "detail": f"Invalid relationship type: {rel_type}. Must be one of {REL_TABLES}",
-        }
+    """Delete a relationship (COW -> export CSV).
 
-    tmp_path = begin_write(db_path)
-    try:
-        result = delete_edge(tmp_path, rel_type, from_id, to_id)
-        if result["status"] == "error":
-            abort_write(tmp_path)
-            return result
-        commit_write(tmp_path, db_path)
-        export_csv(db_path, csv_dir)
-        return result
-    except Exception as exc:
-        with contextlib.suppress(Exception):
-            abort_write(tmp_path)
-        return {"status": "error", "detail": str(exc)}
+    Rel-type and existence validation is owned by ``delete_edge``.
+    """
+    return _run_write(db_path, csv_dir, lambda tmp: delete_edge(tmp, rel_type, from_id, to_id))
 
 
 # ---------------------------------------------------------------------------
@@ -353,11 +279,11 @@ def run(project_dir_str: str) -> None:
     """Start the MCP server."""
     from mcp.server.fastmcp import FastMCP
 
-    project_dir = Path(project_dir_str).resolve()
-    config = _load_config(project_dir)
-    db_path, csv_dir = _resolve_paths(config)
-    config_path = Path(config["_root"]) / ".theo" / "config.json"
-    _ensure_db(db_path, csv_dir)
+    project = load_project(project_dir_str)
+    ensure_db(project)
+    db_path = project.db_path
+    csv_dir = project.csv_dir
+    config_path = project.config_path
 
     # Pre-warm the embedding model so the first ``theo_search`` call is not
     # blocked ~2 s on cold-start model load.  A failure here (offline, bad
@@ -414,6 +340,11 @@ def run(project_dir_str: str) -> None:
         ``table`` optionally restricts the search to one embeddable table
         ("Concept", "SourceFile", "PartOf", "BelongsTo", "InteractsWith",
         "DependsOn", "Imports") or ``null`` for all.
+
+        Note: the ``top_k: int`` annotation is the contract MCP advertises to
+        agents, but clients occasionally send strings or floats over the wire.
+        ``handle_theo_search`` coerces and clamps ``top_k`` itself, so the
+        handler is the source of truth for validation — not this signature.
         """
         return handle_theo_search(db_path, query, table, top_k)
 

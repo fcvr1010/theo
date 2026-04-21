@@ -7,12 +7,14 @@ Starts a local HTTP server and opens a browser to explore the graph.
 The HTML/CSS/JS layer is copied verbatim from Vito's ``graph_server.py``
 (the reference implementation that works well). The data layer is adapted to
 Theo's SourceFile schema (no ``language`` / ``line_count``), and the
-``/search`` endpoint is a stub -- semantic search will be added later.
+``/search`` endpoint runs the same semantic search that the MCP
+``theo_search`` tool exposes, mapping matches onto vis.js node IDs.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import webbrowser
 from pathlib import Path
@@ -21,7 +23,28 @@ from typing import Any, cast
 import real_ladybug as lb
 import typer
 
-from theo._git import find_theo_root
+from theo._db import semantic_search
+from theo._embed import embed_query, prewarm_model
+from theo._schema import NODE_TABLES, REL_ENDPOINTS
+from theo.cli._common import ensure_db, load_project
+
+_log = logging.getLogger(__name__)
+
+# Node tables drive the vis.js id prefix used in ``_build_graph``: Concept → "c:",
+# SourceFile → "f:". Keeping this mapping (and the ``_node_id`` helper below) in
+# one place means the graph build and the /search endpoint agree on node IDs,
+# and that adding a third node table is a one-line change rather than a
+# scavenger hunt through every ``f"c:..."`` literal.
+_NODE_TABLE_PREFIX: dict[str, str] = {"Concept": "c:", "SourceFile": "f:"}
+assert set(_NODE_TABLE_PREFIX) == set(NODE_TABLES), (
+    "_NODE_TABLE_PREFIX must cover every node table"
+)
+
+
+def _node_id(table: str, pk: str) -> str:
+    """Format a vis.js node id from a (table, primary-key) pair."""
+    return f"{_NODE_TABLE_PREFIX[table]}{pk}"
+
 
 # ── Color palette ────────────────────────────────────────────────────────────
 
@@ -164,7 +187,7 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         level = c["level"]
         tier = _level_tier(level)
         colors = CONCEPT_COLORS[tier]
-        nid = f"c:{c['id']}"
+        nid = _node_id("Concept", c["id"])
 
         tip_parts = [
             f'<div class="insp-header">{_esc_html(c["name"])}</div>',
@@ -202,7 +225,7 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         )
 
     for f in files:
-        nid = f"f:{f['path']}"
+        nid = _node_id("SourceFile", f["path"])
 
         tip_parts = [
             f'<div class="insp-header">{_esc_html(f["name"])}</div>',
@@ -244,6 +267,9 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         edge_counter += 1
         return f"e{edge_counter}"
 
+    # Endpoints are looked up via ``REL_ENDPOINTS`` so a new relationship type
+    # only has to appear in the schema — the vis.js ids follow automatically.
+    part_of_from, part_of_to = REL_ENDPOINTS["PartOf"]
     for e in part_of:
         eid = make_edge_id()
         inspector_map[eid] = (
@@ -253,8 +279,8 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         edges.append(
             {
                 "id": eid,
-                "from": f"c:{e['src']}",
-                "to": f"c:{e['dst']}",
+                "from": _node_id(part_of_from, e["src"]),
+                "to": _node_id(part_of_to, e["dst"]),
                 "color": {"color": EDGE_COLORS["PartOf"], "highlight": "#bbbbbb"},
                 "width": 2.5,
                 "dashes": False,
@@ -263,6 +289,7 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
             }
         )
 
+    belongs_from, belongs_to_tbl = REL_ENDPOINTS["BelongsTo"]
     for e in belongs_to:
         eid = make_edge_id()
         inspector_map[eid] = (
@@ -272,8 +299,8 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         edges.append(
             {
                 "id": eid,
-                "from": f"f:{e['src']}",
-                "to": f"c:{e['dst']}",
+                "from": _node_id(belongs_from, e["src"]),
+                "to": _node_id(belongs_to_tbl, e["dst"]),
                 "color": {"color": EDGE_COLORS["PartOf"], "highlight": "#bbbbbb"},
                 "width": 2.5,
                 "dashes": [2, 4],
@@ -283,6 +310,7 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
             }
         )
 
+    interacts_from, interacts_to = REL_ENDPOINTS["InteractsWith"]
     for e in interacts:
         eid = make_edge_id()
         desc = e.get("description", "") or ""
@@ -294,8 +322,8 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         edges.append(
             {
                 "id": eid,
-                "from": f"c:{e['src']}",
-                "to": f"c:{e['dst']}",
+                "from": _node_id(interacts_from, e["src"]),
+                "to": _node_id(interacts_to, e["dst"]),
                 "color": {
                     "color": EDGE_COLORS["InteractsWith"],
                     "highlight": "#FF8A8A",
@@ -307,6 +335,7 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
             }
         )
 
+    depends_from, depends_to = REL_ENDPOINTS["DependsOn"]
     for e in depends:
         eid = make_edge_id()
         desc = e.get("description", "") or ""
@@ -318,8 +347,8 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         edges.append(
             {
                 "id": eid,
-                "from": f"c:{e['src']}",
-                "to": f"c:{e['dst']}",
+                "from": _node_id(depends_from, e["src"]),
+                "to": _node_id(depends_to, e["dst"]),
                 "color": {"color": EDGE_COLORS["DependsOn"], "highlight": "#FFC07A"},
                 "width": 2.5,
                 "dashes": [10, 5],
@@ -328,6 +357,7 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
             }
         )
 
+    imports_from, imports_to = REL_ENDPOINTS["Imports"]
     for e in imports:
         eid = make_edge_id()
         desc = e.get("description", "") or ""
@@ -339,8 +369,8 @@ def _build_graph(db_path: Path, project_slug: str) -> str:
         edges.append(
             {
                 "id": eid,
-                "from": f"f:{e['src']}",
-                "to": f"f:{e['dst']}",
+                "from": _node_id(imports_from, e["src"]),
+                "to": _node_id(imports_to, e["dst"]),
                 "color": {
                     "color": EDGE_COLORS["Imports"],
                     "opacity": 0.4,
@@ -892,16 +922,36 @@ function executeSearch(query) {{
   searchSpinner.style.display = "block";
 
   fetch("/search?q=" + encodeURIComponent(q) + "&top_k=20", {{ signal: searchAbort.signal }})
-    .then(r => r.json())
-    .then(data => {{
+    .then(r => r.json().then(body => ({{ ok: r.ok, body }})))
+    .then(({{ ok, body }}) => {{
       searchSpinner.style.display = "none";
       searchAbort = null;
+
+      // Surface server-side errors (the backend returns 500 with
+      // ``{{results: [], error: ...}}`` when embed_query / semantic_search
+      // fails).  Without this branch the user just sees "0 matches" for
+      // every query and has no indication the backend is broken.
+      if (!ok || body.error) {{
+        searchState.active = false;
+        restoreBaseColors();
+        const raw = body.error || "Search unavailable";
+        searchCount.textContent = raw.length > 40 ? raw.slice(0, 37) + "..." : raw;
+        searchCount.title = raw;
+        searchCount.style.color = "#FF6B6B";
+        searchCount.style.display = "inline";
+        searchClear.style.display = "block";
+        console.error("Search failed:", raw);
+        return;
+      }}
+      // Reset any error styling from a previous failed query.
+      searchCount.style.color = "";
+      searchCount.title = "";
 
       searchState.active = true;
       searchState.matchIds = new Set();
       searchState.scores = {{}};
 
-      (data.results || []).forEach(r => {{
+      (body.results || []).forEach(r => {{
         searchState.matchIds.add(r.nodeId);
         searchState.scores[r.nodeId] = r.score;
       }});
@@ -939,6 +989,13 @@ function executeSearch(query) {{
       if (err.name === "AbortError") return;  // cancelled by new query
       searchSpinner.style.display = "none";
       searchAbort = null;
+      searchState.active = false;
+      restoreBaseColors();
+      searchCount.textContent = "Search unavailable";
+      searchCount.title = String(err);
+      searchCount.style.color = "#FF6B6B";
+      searchCount.style.display = "inline";
+      searchClear.style.display = "block";
       console.error("Search failed:", err);
     }});
 }}
@@ -1147,10 +1204,32 @@ def _ensure_flask() -> None:
         raise typer.Exit(1)  # noqa: B904
 
 
+def _match_to_node_ids(match: dict[str, Any]) -> list[str]:
+    """Translate a ``semantic_search`` match into vis.js node IDs.
+
+    Node matches resolve to a single ID; edge matches resolve to both endpoints
+    so an edge hit lights up the nodes the user can actually see. Returns an
+    empty list for tables the viewer does not render (defensive — today every
+    embeddable table is rendered).
+    """
+    if match["kind"] == "node":
+        if match["table"] not in _NODE_TABLE_PREFIX:
+            return []
+        return [_node_id(match["table"], match["ref"]["id"])]
+
+    from_table, to_table = REL_ENDPOINTS[match["rel_type"]]
+    if from_table not in _NODE_TABLE_PREFIX or to_table not in _NODE_TABLE_PREFIX:
+        return []
+    return [
+        _node_id(from_table, match["ref"]["from_id"]),
+        _node_id(to_table, match["ref"]["to_id"]),
+    ]
+
+
 def _create_app(db_path: Path, project_slug: str) -> Any:
     """Create and configure the Flask application."""
     from flask import Flask as _Flask
-    from flask import jsonify
+    from flask import jsonify, request
 
     flask_app = _Flask(__name__)
 
@@ -1170,33 +1249,67 @@ def _create_app(db_path: Path, project_slug: str) -> Any:
 
     @flask_app.route("/search")
     def search() -> Any:
-        """Search stub. Semantic search will be wired in later; for now
-        the frontend gets an empty result set so the search bar is inert."""
-        return jsonify({"results": []})
+        """Semantic search over the graph; returns ``{results: [{nodeId, score}]}``.
+
+        Edge matches contribute both endpoints to the result set so a strong
+        hit on a relationship still highlights something visible. When a node
+        is reachable from multiple matches (e.g. a direct node hit plus an
+        incident edge hit), the higher score wins.
+        """
+        query = (request.args.get("q") or "").strip()
+        if not query:
+            return jsonify({"results": []})
+
+        top_k_raw = request.args.get("top_k", "20")
+        try:
+            top_k = int(top_k_raw)
+        except (TypeError, ValueError):
+            top_k = 20
+        top_k = max(1, min(top_k, 1000))
+
+        try:
+            qvec = embed_query(query)
+            matches = semantic_search(db_path, qvec, None, top_k)
+        except Exception as exc:
+            _log.exception("semantic search failed for query %r", query)
+            return jsonify({"results": [], "error": str(exc)}), 500
+
+        best: dict[str, float] = {}
+        for m in matches:
+            for node_id in _match_to_node_ids(m):
+                score = float(m["score"])
+                if score > best.get(node_id, float("-inf")):
+                    best[node_id] = score
+
+        ranked = sorted(best.items(), key=lambda kv: kv[1], reverse=True)[:top_k]
+        results = [{"nodeId": nid, "score": score} for nid, score in ranked]
+        return jsonify({"results": results})
 
     return flask_app
 
 
 def run(project_dir_str: str, *, port: int = 7777, no_browser: bool = False) -> None:
     """Start the Theo graph visualization server."""
-    project_dir = Path(project_dir_str).resolve()
-    root = find_theo_root(project_dir)
-    if root is None:
-        typer.echo("Error: no .theo/config.json found (searched upward).", err=True)
-        raise typer.Exit(1)
+    project = load_project(project_dir_str)
+    # ``ensure_db`` auto-rebuilds from CSVs if the DB file is gone and also
+    # runs the embedding-column migration so pre-branch DBs don't blow up on
+    # the first /search.  The viewer is read-only as far as the user is
+    # concerned, so any auto-recovery here is non-destructive.
+    ensure_db(project)
 
-    config_path = root / ".theo" / "config.json"
-    config = json.loads(config_path.read_text())
-    db_rel = config["db_path"]
-    db_path = (root / db_rel).resolve()
-    project_slug: str = config.get("project_slug", root.name)
-
-    if not db_path.exists():
-        typer.echo("Error: database not found. Run 'theo use' first.", err=True)
-        raise typer.Exit(1)
+    project_slug: str = project.config.get("project_slug", project.root.name)
 
     _ensure_flask()
-    flask_app = _create_app(db_path, project_slug)
+    flask_app = _create_app(project.db_path, project_slug)
+
+    # Pre-warm the embedding model so the first /search call does not pay the
+    # ~2 s cold-start inside the user's first keystroke. Failure here is not
+    # fatal: the UI still renders the graph, and the eventual /search call
+    # will surface the real error to the client.
+    try:
+        prewarm_model()
+    except Exception:
+        _log.warning("Failed to pre-warm embedding model; /search will lazy-load", exc_info=True)
 
     url = f"http://127.0.0.1:{port}/"
     typer.echo(f"Starting Theo graph UI at {url}")

@@ -29,7 +29,7 @@ from theo._db import (  # noqa: E402
 from theo._embed import EMBEDDING_DIM, embed_documents, embed_query  # noqa: E402
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def populated_db(tmp_db: Path) -> Path:
     """Seed a fresh DB with a few semantically distinguishable concepts."""
     upsert_node(
@@ -179,6 +179,32 @@ class TestSemanticSearch:
         qvec = embed_query("login")
         matches = semantic_search(populated_db, qvec, "Concept", 5)
         assert matches, "brute-force fallback should return matches"
+
+    def test_hnsw_absent_error_wording_matches_sentinel(self, tmp_db: Path) -> None:
+        """Regression guard for ``_ERR_INDEX_ABSENT``.
+
+        ``_hnsw_search_node`` swallows the "index absent" RuntimeError and
+        falls back to brute-force cosine scoring.  If a KuzuDB/ladybug
+        upgrade ever changes the wording of that error, the sentinel stops
+        matching and every node search silently degrades to brute-force,
+        which is much slower on large graphs.  Reproducing the raw CALL here
+        pins the wording: if this test fails, update ``_ERR_INDEX_ABSENT``
+        in ``_db.py`` to match the new message.
+        """
+        from theo._db import _ERR_INDEX_ABSENT, _execute, _opened
+
+        with _opened(tmp_db, read_only=True) as conn, pytest.raises(RuntimeError) as exc_info:
+            _execute(
+                conn,
+                "CALL QUERY_VECTOR_INDEX('Concept', 'concept_emb_idx', $qvec, 1) RETURN distance",
+                {"qvec": [0.0] * EMBEDDING_DIM},
+            )
+
+        msg = str(exc_info.value)
+        assert any(s in msg for s in _ERR_INDEX_ABSENT), (
+            f"_ERR_INDEX_ABSENT sentinel is stale; actual error was {msg!r}. "
+            f"Update _db.py to match the new wording."
+        )
 
 
 class TestWriteNodeEmbedding:

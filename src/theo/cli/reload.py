@@ -7,33 +7,19 @@ which are the source of truth.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import typer
 
 from theo._db import get_stats, rebuild_from_csv, reindex_all
-from theo._git import find_theo_root
-from theo._schema import CSV_FILES
+from theo._schema import CSV_FILES, NODE_TABLES
+from theo.cli._common import load_project
 
 
 def run(project_dir_str: str) -> None:
     """Rebuild the runtime KuzuDB from the CSV files in ``.theo/``."""
-    project_dir = Path(project_dir_str).resolve()
-    root = find_theo_root(project_dir)
-    if root is None:
-        typer.echo("Error: no .theo/config.json found (searched upward).", err=True)
-        raise typer.Exit(1)
+    project = load_project(project_dir_str)
 
-    config_path = root / ".theo" / "config.json"
-    config = json.loads(config_path.read_text())
-    db_path = root / config["db_path"]
-    csv_dir = root / ".theo"
-
-    # At least the two node-table CSVs must be present; empty is fine (fresh project).
-    missing = [
-        CSV_FILES[t] for t in ("Concept", "SourceFile") if not (csv_dir / CSV_FILES[t]).exists()
-    ]
+    # At least the node-table CSVs must be present; empty is fine (fresh project).
+    missing = [CSV_FILES[t] for t in NODE_TABLES if not (project.csv_dir / CSV_FILES[t]).exists()]
     if missing:
         typer.echo(
             f"Error: missing required CSV file(s): {', '.join(missing)}",
@@ -41,18 +27,18 @@ def run(project_dir_str: str) -> None:
         )
         raise typer.Exit(1)
 
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    rebuild_from_csv(db_path, csv_dir)
+    project.db_path.parent.mkdir(parents=True, exist_ok=True)
+    rebuild_from_csv(project.db_path, project.csv_dir)
 
-    counts = reindex_all(db_path)
+    counts = reindex_all(project.db_path)
     if any(n > 0 for n in counts.values()):
         typer.echo("Reindexed embeddings:")
         for table, n in counts.items():
             if n > 0:
                 typer.echo(f"  {table:20s} {n:>6d}")
 
-    stats = get_stats(db_path)
-    typer.echo(f"Reloaded {db_path} from CSVs in {csv_dir}.")
+    stats = get_stats(project.db_path)
+    typer.echo(f"Reloaded {project.db_path} from CSVs in {project.csv_dir}.")
     typer.echo("")
     typer.echo("Node counts:")
     for table, count in stats["node_counts"].items():

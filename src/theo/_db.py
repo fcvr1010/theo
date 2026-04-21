@@ -107,9 +107,11 @@ _ERR_INDEX_ABSENT = ("doesn't have an index",)
 def migrate_embedding_column(db_path: Path) -> None:
     """Ensure every EMBEDDABLE_TABLES entry has an ``embedding FLOAT[N]`` column.
 
-    Idempotent: re-runs safely on DBs where the column already exists.  Any
-    RuntimeError that is not the specific "column already present" signal is
-    re-raised so upstream problems are surfaced, not masked.
+    Opens a writer connection (``ALTER TABLE`` is a write), unlike most other
+    entry points in this file which open read-only.  Idempotent: re-runs
+    safely on DBs where the column already exists.  Any RuntimeError that is
+    not the specific "column already present" signal is re-raised so upstream
+    problems are surfaced, not masked.
     """
     with _opened(db_path) as conn:
         for table in EMBEDDABLE_TABLES:
@@ -307,34 +309,61 @@ def _hnsw_search_node(
     return matches
 
 
+def _run_cosine_search(
+    conn: lb.Connection,
+    *,
+    match_clause: str,
+    emb_ref: str,
+    return_cols: str,
+    query_vec: list[float],
+    top_k: int,
+) -> list[list[Any]]:
+    """Execute a brute-force cosine similarity query and return its rows.
+
+    Factors out the boilerplate shared by the node- and edge-brute-force
+    paths: null-embedding filter, similarity expression, ``ORDER BY sim DESC
+    LIMIT`` and row collection.  Callers provide the MATCH clause, the alias
+    carrying the embedding column, and the non-sim RETURN columns; the helper
+    appends ``sim`` as the final column.  Keeping the Cypher shape in one
+    place means the node and edge paths can only drift in intentional ways.
+    """
+    result = _execute(
+        conn,
+        f"{match_clause} WHERE {emb_ref} IS NOT NULL "
+        f"WITH *, array_cosine_similarity({emb_ref}, "
+        f'cast($qvec, "FLOAT[{EMBEDDING_DIM}]")) AS sim '
+        f"RETURN {return_cols}, sim ORDER BY sim DESC LIMIT {top_k}",
+        {"qvec": query_vec},
+    )
+    rows: list[list[Any]] = []
+    while result.has_next():
+        rows.append(_row(result))
+    return rows
+
+
 def _brute_force_search_node(
     conn: lb.Connection, table: str, query_vec: list[float], top_k: int
 ) -> list[dict[str, Any]]:
     """Brute-force cosine search on a node table."""
     pk_field = PK_MAP[table]
-    result = _execute(
+    rows = _run_cosine_search(
         conn,
-        f"MATCH (n:{table}) WHERE n.embedding IS NOT NULL "
-        f"WITH n, array_cosine_similarity(n.embedding, "
-        f'cast($qvec, "FLOAT[{EMBEDDING_DIM}]")) AS sim '
-        f"RETURN n.{pk_field} AS id, n.name AS name, "
-        f"n.description AS description, sim "
-        f"ORDER BY sim DESC LIMIT {top_k}",
-        {"qvec": query_vec},
+        match_clause=f"MATCH (n:{table})",
+        emb_ref="n.embedding",
+        return_cols=f"n.{pk_field} AS id, n.name AS name, n.description AS description",
+        query_vec=query_vec,
+        top_k=top_k,
     )
-    matches: list[dict[str, Any]] = []
-    while result.has_next():
-        row = _row(result)
-        matches.append(
-            {
-                "kind": "node",
-                "table": table,
-                "score": row[3],
-                "description": row[2] or "",
-                "ref": {"id": row[0], "name": row[1]},
-            }
-        )
-    return matches
+    return [
+        {
+            "kind": "node",
+            "table": table,
+            "score": row[3],
+            "description": row[2] or "",
+            "ref": {"id": row[0], "name": row[1]},
+        }
+        for row in rows
+    ]
 
 
 def _brute_force_search_edge(
@@ -344,30 +373,24 @@ def _brute_force_search_edge(
     from_table, to_table = REL_ENDPOINTS[rel_type]
     from_pk = PK_MAP[from_table]
     to_pk = PK_MAP[to_table]
-    result = _execute(
+    rows = _run_cosine_search(
         conn,
-        f"MATCH (a:{from_table})-[r:{rel_type}]->(b:{to_table}) "
-        f"WHERE r.embedding IS NOT NULL "
-        f"WITH a, r, b, array_cosine_similarity(r.embedding, "
-        f'cast($qvec, "FLOAT[{EMBEDDING_DIM}]")) AS sim '
-        f"RETURN a.{from_pk} AS from_id, b.{to_pk} AS to_id, "
-        f"r.description AS description, sim "
-        f"ORDER BY sim DESC LIMIT {top_k}",
-        {"qvec": query_vec},
+        match_clause=f"MATCH (a:{from_table})-[r:{rel_type}]->(b:{to_table})",
+        emb_ref="r.embedding",
+        return_cols=(f"a.{from_pk} AS from_id, b.{to_pk} AS to_id, r.description AS description"),
+        query_vec=query_vec,
+        top_k=top_k,
     )
-    matches: list[dict[str, Any]] = []
-    while result.has_next():
-        row = _row(result)
-        matches.append(
-            {
-                "kind": "edge",
-                "rel_type": rel_type,
-                "score": row[3],
-                "description": row[2] or "",
-                "ref": {"from_id": row[0], "to_id": row[1]},
-            }
-        )
-    return matches
+    return [
+        {
+            "kind": "edge",
+            "rel_type": rel_type,
+            "score": row[3],
+            "description": row[2] or "",
+            "ref": {"from_id": row[0], "to_id": row[1]},
+        }
+        for row in rows
+    ]
 
 
 def semantic_search(
@@ -397,6 +420,12 @@ def semantic_search(
     """
     if table is not None and table not in EMBEDDABLE_TABLES:
         raise ValueError(f"Unknown embeddable table: {table}")
+    # ``top_k`` is interpolated into Cypher ``LIMIT`` — defensively reject
+    # anything that isn't a small positive int so callers who forget to
+    # validate upstream get a clear error rather than a Cypher parse failure
+    # or an unbounded scan.
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 1:
+        raise ValueError(f"top_k must be a positive int, got: {top_k!r}")
 
     targets = [table] if table else list(EMBEDDABLE_TABLES)
     collected: list[dict[str, Any]] = []

@@ -10,8 +10,8 @@ import click
 import pytest
 
 from theo._db import export_csv, reindex_all, run_query, upsert_edge, upsert_node
+from theo.cli._common import Project, ensure_db
 from theo.cli.serve import (
-    _ensure_db,
     handle_theo_delete_edge,
     handle_theo_delete_node,
     handle_theo_query,
@@ -21,6 +21,17 @@ from theo.cli.serve import (
     handle_theo_upsert_edge,
     handle_theo_upsert_node,
 )
+
+
+def _project(root: Path, db_path: Path, csv_dir: Path) -> Project:
+    """Build a minimal Project for tests that exercise ``ensure_db`` directly."""
+    return Project(
+        root=root,
+        config_path=root / ".theo" / "config.json",
+        db_path=db_path,
+        csv_dir=csv_dir,
+        config={},
+    )
 
 
 class TestHandleTheoStats:
@@ -227,12 +238,10 @@ class TestEnsureDb:
         upsert_node(db_path, "Concept", {"id": "surv", "name": "Survivor"})
         upsert_node(db_path, "Concept", {"id": "other"})
         upsert_edge(db_path, "PartOf", "surv", "other", git_revision="r1")
-        from theo._db import export_csv
-
         export_csv(db_path, csv_dir)
         db_path.unlink()
 
-        _ensure_db(db_path, csv_dir)
+        ensure_db(_project(tmp_theo_project, db_path, csv_dir))
 
         assert db_path.exists()
         rows = run_query(db_path, "MATCH (n:Concept {id: 'surv'}) RETURN n.name")
@@ -243,15 +252,15 @@ class TestEnsureDb:
         csv_dir = tmp_path / "csv"
         csv_dir.mkdir(parents=True)
         with pytest.raises(click.exceptions.Exit):
-            _ensure_db(db_path, csv_dir)
+            ensure_db(_project(tmp_path, db_path, csv_dir))
 
     def test_does_not_rebuild_when_db_exists(self, tmp_theo_project: Path) -> None:
         # The fixture's fresh DB has the embedding column via DDL, so the
-        # idempotent migration inside _ensure_db is a no-op, but it still
+        # idempotent migration inside ``ensure_db`` is a no-op, but it still
         # opens a connection which bumps mtime.  What we actually care about
-        # is that _ensure_db does NOT re-run ``rebuild_from_csv`` (that would
-        # wipe any runtime state).  Check that by seeding a marker Concept
-        # via the DB directly and verifying it survives the call.
+        # is that ``ensure_db`` does NOT re-run ``rebuild_from_csv`` (that
+        # would wipe any runtime state).  Check that by seeding a marker
+        # Concept via the DB directly and verifying it survives the call.
         db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
         csv_dir = tmp_theo_project / ".theo"
 
@@ -260,7 +269,7 @@ class TestEnsureDb:
             "Concept",
             {"id": "survivor", "name": "Survivor", "git_revision": "abc"},
         )
-        _ensure_db(db_path, csv_dir)
+        ensure_db(_project(tmp_theo_project, db_path, csv_dir))
         rows = run_query(db_path, "MATCH (n:Concept {id: 'survivor'}) RETURN n.name")
         assert rows and rows[0]["n.name"] == "Survivor"
 
@@ -378,7 +387,7 @@ class TestHandleTheoReload:
         assert result["status"] == "error"
         assert "concepts.csv" in result["detail"]
 
-    @pytest.mark.integration  # type: ignore[misc]
+    @pytest.mark.integration
     def test_reindexes_when_fastembed_available(self, tmp_theo_project: Path) -> None:
         pytest.importorskip("fastembed")
         db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
