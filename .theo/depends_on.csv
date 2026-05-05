@@ -5,3 +5,5 @@ ui_server,git_helpers,ui.py uses find_theo_root to locate config.json; talks to 
 graph_db,graph_schema,"_db.py imports all schema constants (tables, PKs, DDL, column orders) and drives KuzuDB operations from them",c47921d18e3b269886d0d301a746bc937c5dff2c
 project_init,skills_bundle,use.py reads skill markdown via importlib.resources and writes it into .claude/ and .agents/,c47921d18e3b269886d0d301a746bc937c5dff2c
 project_init,graph_core,use.py calls _db.init_schema to bootstrap the DB and uses _schema.CSV_FILES to seed empty CSVs,c47921d18e3b269886d0d301a746bc937c5dff2c
+semantic_layer,graph_db,"Embedding writes, HNSW lifecycle, and `semantic_search` live inside graph_db's `_db.py` -- the semantic layer extends graph_db rather than owning its own DB primitives.",3836673
+semantic_layer,graph_schema,"`_schema.py` declares `EMBEDDING_DIM`, `EMBEDDABLE_TABLES`, `HNSW_INDEX_NAMES`, and extends every NODE_DDL/REL_DDL entry with the `embedding FLOAT[768]` column the semantic layer reads/writes.",3836673

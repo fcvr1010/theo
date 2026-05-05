@@ -9,3 +9,4 @@ graph_db,graph_core,,c47921d18e3b269886d0d301a746bc937c5dff2c
 cow_lifecycle,graph_core,,c47921d18e3b269886d0d301a746bc937c5dff2c
 git_helpers,graph_core,,c47921d18e3b269886d0d301a746bc937c5dff2c
 project_init,cli_commands,,c47921d18e3b269886d0d301a746bc937c5dff2c
+semantic_layer,theo,"Semantic layer is one of the top-level subsystems of Theo, alongside graph_core, mcp_interface, cli_commands, skills_bundle, tests, and ui_server.",3836673

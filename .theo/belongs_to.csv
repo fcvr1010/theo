@@ -38,3 +38,10 @@ LICENSE,theo,,c47921d18e3b269886d0d301a746bc937c5dff2c
 .github/workflows/integration.yml,tests,,c47921d18e3b269886d0d301a746bc937c5dff2c
 .github/dependabot.yml,theo,,c47921d18e3b269886d0d301a746bc937c5dff2c
 src/theo/cli/reload.py,cli_commands,,d009f2a65db235124aa95065178bad092ee05656
+src/theo/_embed.py,semantic_layer,Embedding pipeline -- the fastembed-backed entry point into the semantic layer.,3836673
+src/theo/_ext.py,semantic_layer,KuzuDB VECTOR-extension loader used by every connection that touches HNSW or cosine similarity.,3836673
+src/theo/cli/reindex.py,cli_commands,`theo reindex` subcommand handler.,3836673
+tests/unit/test_embed.py,tests,Unit tests for the embedding text builders.,3836673
+tests/integration/test_semantic_search.py,tests,Integration tests covering the full semantic layer.,3836673
+tests/integration/test_reindex.py,tests,Integration tests for `theo reindex`.,3836673
+tests/integration/test_reload.py,tests,Integration tests for `theo reload` and the reindex-on-reload step.,3836673

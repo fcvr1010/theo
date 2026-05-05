@@ -30,10 +30,10 @@ If you prefer `theo` to pick up local edits without reinstalling, add `--editabl
 uv tool install --force --editable .
 ```
 
-To include optional extras (e.g. the UI or semantic search):
+To include the optional UI extra:
 
 ```bash
-uv tool install --force --editable ".[ui,semantic]"
+uv tool install --force --editable ".[ui]"
 ```
 
 To remove the tool:

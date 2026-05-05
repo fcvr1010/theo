@@ -14,7 +14,7 @@ from theo._db import init_schema, upsert_edge, upsert_node
 pytest.importorskip("flask", reason="Flask not installed (theo[ui] extra)")
 
 
-@pytest.fixture()  # type: ignore[misc]
+@pytest.fixture()
 def theo_project(tmp_path: Path) -> Path:
     """Create a minimal .theo/ project with a populated DB."""
     theo_dir = tmp_path / ".theo"
@@ -279,7 +279,8 @@ def test_flask_health(theo_project: Path) -> None:
 
 
 def test_search_empty_query(theo_project: Path) -> None:
-    """Search with empty query should return empty results."""
+    """Empty queries short-circuit to an empty result set without embedding."""
+    from theo.cli import ui as ui_module
     from theo.cli.ui import _create_app
 
     db_path = theo_project / ".theo" / "db" / "theo.db"
@@ -288,95 +289,150 @@ def test_search_empty_query(theo_project: Path) -> None:
     with flask_app.test_client() as client:
         response = client.get("/search?q=")
         assert response.status_code == 200
+        assert response.get_json() == {"results": []}
+
+    # Whitespace-only queries behave the same way — and must not invoke the
+    # embedding model (whose cold-start is ~2 s).
+    assert hasattr(ui_module, "embed_query")
+    with flask_app.test_client() as client:
+        response = client.get("/search?q=%20%20%20")
+        assert response.status_code == 200
+        assert response.get_json() == {"results": []}
+
+
+def test_search_maps_node_matches_to_vis_ids(
+    theo_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Node matches from semantic_search map onto the c:/f: vis.js prefixes."""
+    from theo.cli import ui as ui_module
+    from theo.cli.ui import _create_app
+
+    db_path = theo_project / ".theo" / "db" / "theo.db"
+
+    monkeypatch.setattr(ui_module, "embed_query", lambda q: [0.0] * 768)
+    monkeypatch.setattr(
+        ui_module,
+        "semantic_search",
+        lambda *_args, **_kwargs: [
+            {
+                "kind": "node",
+                "table": "Concept",
+                "score": 0.91,
+                "description": "The core system",
+                "ref": {"id": "core", "name": "Core"},
+            },
+            {
+                "kind": "node",
+                "table": "SourceFile",
+                "score": 0.73,
+                "description": "Entry point",
+                "ref": {"id": "src/main.py", "name": "main.py"},
+            },
+        ],
+    )
+
+    flask_app = _create_app(db_path, "test-project")
+    with flask_app.test_client() as client:
+        response = client.get("/search?q=anything")
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "results": [
+                {"nodeId": "c:core", "score": 0.91},
+                {"nodeId": "f:src/main.py", "score": 0.73},
+            ]
+        }
+
+
+def test_search_edge_matches_light_up_both_endpoints(
+    theo_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An edge match adds its two endpoints; the higher score wins per node."""
+    from theo.cli import ui as ui_module
+    from theo.cli.ui import _create_app
+
+    db_path = theo_project / ".theo" / "db" / "theo.db"
+
+    monkeypatch.setattr(ui_module, "embed_query", lambda q: [0.0] * 768)
+    monkeypatch.setattr(
+        ui_module,
+        "semantic_search",
+        lambda *_args, **_kwargs: [
+            # BelongsTo runs SourceFile -> Concept. Both endpoints should appear.
+            {
+                "kind": "edge",
+                "rel_type": "BelongsTo",
+                "score": 0.85,
+                "description": "main belongs to core",
+                "ref": {"from_id": "src/main.py", "to_id": "core"},
+            },
+            # A weaker direct node match on c:core should not displace the 0.85.
+            {
+                "kind": "node",
+                "table": "Concept",
+                "score": 0.40,
+                "description": "The core system",
+                "ref": {"id": "core", "name": "Core"},
+            },
+        ],
+    )
+
+    flask_app = _create_app(db_path, "test-project")
+    with flask_app.test_client() as client:
+        response = client.get("/search?q=anything")
+        assert response.status_code == 200
+        results = response.get_json()["results"]
+
+    by_id = {r["nodeId"]: r["score"] for r in results}
+    assert by_id == {"f:src/main.py": 0.85, "c:core": 0.85}
+    # Results must come back sorted by descending score.
+    assert [r["score"] for r in results] == sorted((r["score"] for r in results), reverse=True)
+
+
+def test_search_surfaces_backend_errors_as_500(
+    theo_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exceptions from embed_query / semantic_search become an HTTP 500."""
+    from theo.cli import ui as ui_module
+    from theo.cli.ui import _create_app
+
+    db_path = theo_project / ".theo" / "db" / "theo.db"
+
+    def _boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("model offline")
+
+    monkeypatch.setattr(ui_module, "embed_query", _boom)
+
+    flask_app = _create_app(db_path, "test-project")
+    with flask_app.test_client() as client:
+        response = client.get("/search?q=anything")
+        assert response.status_code == 500
         data = response.get_json()
         assert data["results"] == []
+        assert "model offline" in data["error"]
 
 
-def test_search_matching_query(theo_project: Path) -> None:
-    """Search for 'core' should return the Core concept node."""
+def test_search_top_k_is_clamped_and_forwarded(
+    theo_project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invalid/extreme top_k values are coerced before reaching semantic_search."""
+    from theo.cli import ui as ui_module
     from theo.cli.ui import _create_app
 
     db_path = theo_project / ".theo" / "db" / "theo.db"
+    seen: list[int] = []
+
+    def _capture(_db: Path, _qvec: Any, _table: Any, top_k: int) -> list[Any]:
+        seen.append(top_k)
+        return []
+
+    monkeypatch.setattr(ui_module, "embed_query", lambda q: [0.0] * 768)
+    monkeypatch.setattr(ui_module, "semantic_search", _capture)
+
     flask_app = _create_app(db_path, "test-project")
-
     with flask_app.test_client() as client:
-        response = client.get("/search?q=core")
-        assert response.status_code == 200
-        data = response.get_json()
-        results = data["results"]
-        assert len(results) > 0
-        node_ids = [r["nodeId"] for r in results]
-        assert "c:core" in node_ids
+        client.get("/search?q=x&top_k=7")
+        client.get("/search?q=x&top_k=notanumber")  # falls back to default 20
+        client.get("/search?q=x&top_k=0")  # clamped up to 1
+        client.get("/search?q=x&top_k=100000")  # clamped down to 1000
 
-
-def test_search_file_node(theo_project: Path) -> None:
-    """Search for 'main' should return the main.py source file node."""
-    from theo.cli.ui import _create_app
-
-    db_path = theo_project / ".theo" / "db" / "theo.db"
-    flask_app = _create_app(db_path, "test-project")
-
-    with flask_app.test_client() as client:
-        response = client.get("/search?q=main")
-        assert response.status_code == 200
-        data = response.get_json()
-        results = data["results"]
-        assert len(results) > 0
-        node_ids = [r["nodeId"] for r in results]
-        assert "f:src/main.py" in node_ids
-
-
-def test_search_description_match_scores_lower(theo_project: Path) -> None:
-    """A description-only match should score 0.6, lower than a name match (1.0)."""
-    from theo.cli.ui import _create_app
-
-    db_path = theo_project / ".theo" / "db" / "theo.db"
-    flask_app = _create_app(db_path, "test-project")
-
-    with flask_app.test_client() as client:
-        # "entry" appears only in main.py's description ("Entry point")
-        response = client.get("/search?q=entry")
-        assert response.status_code == 200
-        data = response.get_json()
-        results = data["results"]
-        assert len(results) > 0
-        for r in results:
-            if r["nodeId"] == "f:src/main.py":
-                assert r["score"] == 0.6
-                break
-        else:
-            pytest.fail("Expected main.py in results for 'entry' query")
-
-
-def test_search_no_match(theo_project: Path) -> None:
-    """Search for a nonexistent term should return empty results."""
-    from theo.cli.ui import _create_app
-
-    db_path = theo_project / ".theo" / "db" / "theo.db"
-    flask_app = _create_app(db_path, "test-project")
-
-    with flask_app.test_client() as client:
-        response = client.get("/search?q=zzzznonexistent")
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data["results"] == []
-
-
-def test_search_name_match_ranks_higher(theo_project: Path) -> None:
-    """Name matches (1.0) should rank above description-only matches (0.6)."""
-    from theo.cli.ui import _create_app
-
-    db_path = theo_project / ".theo" / "db" / "theo.db"
-    flask_app = _create_app(db_path, "test-project")
-
-    with flask_app.test_client() as client:
-        # "pars" matches both Parser (name) and "Parses input files" (description of Parser)
-        response = client.get("/search?q=pars")
-        assert response.status_code == 200
-        data = response.get_json()
-        results = data["results"]
-        assert len(results) > 0
-        # The parser concept should appear with score 1.0 (name match)
-        parser_results = [r for r in results if r["nodeId"] == "c:parser"]
-        assert len(parser_results) == 1
-        assert parser_results[0]["score"] == 1.0
+    assert seen == [7, 20, 1, 1000]

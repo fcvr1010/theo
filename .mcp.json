@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "theo": {
-      "command": "/home/francesco/.local/bin/theo",
+      "command": "theo",
       "args": [
         "serve",
         "/home/francesco/workspace/theo"
