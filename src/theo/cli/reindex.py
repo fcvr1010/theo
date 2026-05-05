@@ -11,6 +11,7 @@ from __future__ import annotations
 import typer
 
 from theo._db import migrate_embedding_column, reindex_all
+from theo._embed import prewarm_model
 from theo.cli._common import load_project
 
 
@@ -27,6 +28,14 @@ def run(project_dir_str: str) -> None:
 
     # Guarantee the embedding column exists on older DBs.
     migrate_embedding_column(project.db_path)
+
+    # Warm the model up front so the user sees an explicit "Loading model..."
+    # message rather than a misleading silent pause after "Reindexing
+    # embeddings...".  fastembed cold start is ~2 s on first use of a fresh
+    # checkout (downloads/loads ONNX weights); subsequent invocations are
+    # near-instant once the model is cached.
+    typer.echo("Loading embedding model...")
+    prewarm_model()
 
     typer.echo("Reindexing embeddings...")
     counts = reindex_all(project.db_path)

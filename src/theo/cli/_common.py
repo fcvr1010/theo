@@ -79,6 +79,16 @@ def ensure_db(project: Project) -> None:
     strict "did the user run 'theo use' yet?" check; ``reindex`` and
     ``reload`` intentionally don't call this because they already own a more
     specific missing-DB failure mode.
+
+    .. note::
+       This function does *not* run :func:`theo._db.reindex_all` after an
+       auto-rebuild — embeddings are derived and the rebuild path knowingly
+       reconstructs the graph with empty ``embedding`` columns.  Callers
+       that hit the auto-rebuild branch will see ``theo_search`` return
+       empty results until an explicit ``theo reindex`` runs.  This is
+       intentional: ``reindex_all`` loads fastembed (~2 s) and embeds every
+       row, which would silently slow down every ``theo serve`` / ``theo
+       ui`` startup that follows a CSV-only checkout.
     """
     if not project.db_path.exists():
         required_csvs = [CSV_FILES[t] for t in NODE_TABLES]

@@ -23,7 +23,7 @@ from typing import Any, cast
 import real_ladybug as lb
 import typer
 
-from theo._db import semantic_search
+from theo._db import _opened, semantic_search
 from theo._embed import embed_query, prewarm_model
 from theo._schema import NODE_TABLES, REL_ENDPOINTS
 from theo.cli._common import ensure_db, load_project
@@ -130,50 +130,54 @@ def _esc_html(text: str | None) -> str:
 def _build_graph(db_path: Path, project_slug: str) -> str:
     """Query the Theo KuzuDB and return a self-contained HTML page."""
     # Fresh connection every request -- the indexer uses COW atomic rename,
-    # so a cached handle would read stale data.
-    db = lb.Database(str(db_path), read_only=True)
-    conn = lb.Connection(db)
+    # so a cached handle would read stale data.  Going through ``_opened``
+    # closes the Connection + Database deterministically rather than relying
+    # on CPython GC, which has been observed to corrupt the WAL when the
+    # viewer races with ``theo reload`` / ``theo reindex`` writers.
+    with _opened(db_path, read_only=True) as conn:
+        concepts = _query(
+            conn,
+            """
+            MATCH (c:Concept)
+            RETURN c.id AS id, c.name AS name, c.level AS level,
+                   c.description AS description, c.notes AS notes
+            ORDER BY c.level, c.name
+            """,
+        )
+        files = _query(
+            conn,
+            """
+            MATCH (f:SourceFile)
+            RETURN f.path AS path, f.name AS name,
+                   f.description AS description, f.notes AS notes
+            ORDER BY f.path
+            """,
+        )
+        part_of = _query(
+            conn, "MATCH (a:Concept)-[:PartOf]->(b:Concept) RETURN a.id AS src, b.id AS dst"
+        )
+        belongs_to = _query(
+            conn,
+            "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) RETURN f.path AS src, c.id AS dst",
+        )
+        interacts = _query(
+            conn,
+            "MATCH (a:Concept)-[r:InteractsWith]->(b:Concept) "
+            "RETURN a.id AS src, b.id AS dst, r.description AS description",
+        )
+        depends = _query(
+            conn,
+            "MATCH (a:Concept)-[r:DependsOn]->(b:Concept) "
+            "RETURN a.id AS src, b.id AS dst, r.description AS description",
+        )
+        imports = _query(
+            conn,
+            "MATCH (a:SourceFile)-[r:Imports]->(b:SourceFile) "
+            "RETURN a.path AS src, b.path AS dst, r.description AS description",
+        )
 
-    concepts = _query(
-        conn,
-        """
-        MATCH (c:Concept)
-        RETURN c.id AS id, c.name AS name, c.level AS level,
-               c.description AS description, c.notes AS notes
-        ORDER BY c.level, c.name
-        """,
-    )
-    files = _query(
-        conn,
-        """
-        MATCH (f:SourceFile)
-        RETURN f.path AS path, f.name AS name,
-               f.description AS description, f.notes AS notes
-        ORDER BY f.path
-        """,
-    )
-    part_of = _query(
-        conn, "MATCH (a:Concept)-[:PartOf]->(b:Concept) RETURN a.id AS src, b.id AS dst"
-    )
-    belongs_to = _query(
-        conn,
-        "MATCH (f:SourceFile)-[:BelongsTo]->(c:Concept) RETURN f.path AS src, c.id AS dst",
-    )
-    interacts = _query(
-        conn,
-        "MATCH (a:Concept)-[r:InteractsWith]->(b:Concept) "
-        "RETURN a.id AS src, b.id AS dst, r.description AS description",
-    )
-    depends = _query(
-        conn,
-        "MATCH (a:Concept)-[r:DependsOn]->(b:Concept) "
-        "RETURN a.id AS src, b.id AS dst, r.description AS description",
-    )
-    imports = _query(
-        conn,
-        "MATCH (a:SourceFile)-[r:Imports]->(b:SourceFile) "
-        "RETURN a.path AS src, b.path AS dst, r.description AS description",
-    )
+    # All queries done; the connection is closed.  HTML assembly below is
+    # pure Python over already-fetched data.
 
     # ── Build vis.js data ──
 

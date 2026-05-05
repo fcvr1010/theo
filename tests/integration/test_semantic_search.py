@@ -261,16 +261,23 @@ class TestWriteNodeEmbedding:
         assert calls["count"] == 1, "SET should have been attempted exactly once"
 
         # After the failure, the HNSW index must be back: running the search
-        # path that exercises HNSW and asserting it does not take the
-        # brute-force fallback is the most direct check we can make.
+        # path that exercises HNSW and asserting it does not raise (and
+        # returns the expected empty result, since the only Concept row has
+        # a NULL embedding) is the most direct check we can make.  The
+        # ``victim`` row has no vector because SET was the call we forced
+        # to fail.
         qvec = embed_query("t")
         matches = semantic_search(tmp_db, qvec, "Concept", 5)
-        # Matches come back; the embedding itself was not written so the
-        # victim row has no vector, but the important invariant is that
-        # CREATE_VECTOR_INDEX ran successfully.  If it hadn't, a subsequent
+        # No row has an embedding yet, so no matches are expected.  The
+        # important invariant is that the call returned cleanly (proving
+        # CREATE_VECTOR_INDEX ran successfully).  If it hadn't, a subsequent
         # write_node_embedding on a *different* node would redundantly drop
         # a non-existent index and succeed on SET — so provoke that path
         # and verify it does not raise.
+        assert matches == [], (
+            f"Expected no matches when every Concept row has a NULL embedding, got: {matches!r}"
+        )
+
         upsert_node(
             tmp_db, "Concept", {"id": "survivor", "description": "post", "git_revision": "r"}
         )
@@ -279,8 +286,6 @@ class TestWriteNodeEmbedding:
             tmp_db, "MATCH (n:Concept {id: 'survivor'}) RETURN n.embedding IS NULL AS is_null"
         )
         assert rows[0]["is_null"] is False
-        # And the query returned the expected number of results.
-        assert len(matches) >= 0
 
 
 class TestExportExcludesEmbeddings:

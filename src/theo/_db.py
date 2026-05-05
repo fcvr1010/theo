@@ -214,6 +214,13 @@ def write_node_embedding(
     (A hard process crash between DROP and CREATE can still leave it
     dropped; search falls back to brute force and the next successful
     write recreates the index.)
+
+    .. note::
+       This is a granular test/utility entry point used by the integration
+       suite to exercise the drop-SET-create sequence in isolation.  The
+       canonical production write path is :func:`reindex_all`, which batches
+       all writes into a single drop-SET-create per table — much cheaper on
+       graphs of any non-trivial size.
     """
     if table not in NODE_TABLES:
         raise ValueError(f"Unknown node table: {table}")
@@ -244,6 +251,11 @@ def write_edge_embedding(
     Relationship tables have no HNSW index in KuzuDB, so this is a plain
     ``SET``.  Search over relationship embeddings uses brute-force cosine
     similarity.
+
+    .. note::
+       Like :func:`write_node_embedding`, this is a granular test/utility
+       entry point.  The canonical production write path is
+       :func:`reindex_all`.
     """
     if rel_type not in REL_TABLES:
         raise ValueError(f"Unknown relationship type: {rel_type}")
@@ -457,6 +469,23 @@ def reindex_all(db_path: Path) -> dict[str, int]:
        for each rel table just SET.
 
     Returns per-table counts of rows that received a fresh embedding.
+
+    Embeddings are written directly to ``db_path`` (no copy-on-write swap):
+    on a mid-reindex crash the on-disk graph remains structurally intact,
+    only the derived ``embedding`` column is affected.  This is safe because
+    the CSV source-of-truth never stores embeddings -- they are always
+    rebuilt from the populated graph -- so worst case the next ``theo
+    reindex`` regenerates them from scratch.
+
+    **Failure semantics.**  If any node-table SET loop or any rel-table SET
+    loop raises, the function NULLs the embedding column on every embeddable
+    table (nodes + rels) before re-raising.  This guarantees a global
+    "loudly empty" invariant for the whole call: after a failure, no table
+    is left with stale or partially-populated embeddings that would silently
+    skew the brute-force path's ``WHERE embedding IS NOT NULL`` filter.
+    HNSW indexes on every node table are recreated regardless so that
+    subsequent searches do not pay a permanent brute-force penalty in the
+    degraded window.
     """
     from theo._embed import embed_documents, make_edge_text, make_node_text
 
@@ -512,18 +541,44 @@ def reindex_all(db_path: Path) -> dict[str, int]:
     # otherwise leave the embedding column half-populated -- and because the
     # brute-force path filters ``WHERE embedding IS NOT NULL`` that state is
     # invisible: search silently returns incomplete results.  On any failure
-    # we null the column for the affected table/rel so the post-failure state
-    # is "no embeddings for this table" (loudly empty) rather than "some
-    # embeddings" (quietly wrong).  A retry re-embeds from scratch, which is
-    # cheap enough at this scale.
+    # we null the column on EVERY embeddable table (nodes + rels) so the
+    # post-failure state is "no embeddings anywhere" (loudly empty) rather
+    # than "some embeddings, some not" (quietly wrong).  A retry re-embeds
+    # from scratch, which is cheap enough at this scale.
     counts: dict[str, int] = {}
+
+    def _null_all_embeddings(conn: lb.Connection) -> None:
+        """NULL the embedding column on every embeddable table.
+
+        Best-effort: each individual statement is wrapped in
+        ``contextlib.suppress`` so a partial cleanup does not mask the
+        original failure that triggered it.  For node tables the HNSW
+        index is dropped before the NULL (KuzuDB rejects ``SET`` on a
+        column with an active HNSW index) and recreated afterwards so the
+        degraded window does not extend beyond the reindex itself.
+        """
+        for tbl in NODE_TABLES:
+            with contextlib.suppress(Exception):
+                _drop_vector_index(conn, tbl)
+            with contextlib.suppress(Exception):
+                _execute(conn, f"MATCH (n:{tbl}) SET n.embedding = NULL")
+            with contextlib.suppress(Exception):
+                _create_vector_index(conn, tbl)
+        for rt in REL_TABLES:
+            ft, tt = REL_ENDPOINTS[rt]
+            with contextlib.suppress(Exception):
+                _execute(
+                    conn,
+                    f"MATCH (a:{ft})-[r:{rt}]->(b:{tt}) SET r.embedding = NULL",
+                )
+
     with _opened(db_path) as conn:
-        for table in NODE_TABLES:
-            rows = node_rows[table]
-            vectors = node_vectors[table]
-            pk_field = PK_MAP[table]
-            _drop_vector_index(conn, table)
-            try:
+        try:
+            for table in NODE_TABLES:
+                rows = node_rows[table]
+                vectors = node_vectors[table]
+                pk_field = PK_MAP[table]
+                _drop_vector_index(conn, table)
                 try:
                     for (pk_value, _text), vec in zip(rows, vectors, strict=True):
                         _execute(
@@ -531,25 +586,20 @@ def reindex_all(db_path: Path) -> dict[str, int]:
                             f"MATCH (n:{table} {{{pk_field}: $pk}}) SET n.embedding = $emb",
                             {"pk": pk_value, "emb": vec},
                         )
-                except Exception:
-                    with contextlib.suppress(Exception):
-                        _execute(conn, f"MATCH (n:{table}) SET n.embedding = NULL")
-                    raise
-            finally:
-                # Always recreate the index, even if SET raised partway through;
-                # otherwise the table would be left indexless until the next
-                # reindex.  Search still works via brute-force fallback in the
-                # degraded window.
-                _create_vector_index(conn, table)
-            counts[table] = len(rows)
+                finally:
+                    # Always recreate the index, even if SET raised partway through;
+                    # otherwise the table would be left indexless until the next
+                    # reindex.  Search still works via brute-force fallback in the
+                    # degraded window.
+                    _create_vector_index(conn, table)
+                counts[table] = len(rows)
 
-        for rel_type in REL_TABLES:
-            rels = edge_rows[rel_type]
-            vectors = edge_vectors[rel_type]
-            from_table, to_table = REL_ENDPOINTS[rel_type]
-            from_pk = PK_MAP[from_table]
-            to_pk = PK_MAP[to_table]
-            try:
+            for rel_type in REL_TABLES:
+                rels = edge_rows[rel_type]
+                vectors = edge_vectors[rel_type]
+                from_table, to_table = REL_ENDPOINTS[rel_type]
+                from_pk = PK_MAP[from_table]
+                to_pk = PK_MAP[to_table]
                 for (f_id, t_id, _text), vec in zip(rels, vectors, strict=True):
                     _execute(
                         conn,
@@ -559,15 +609,10 @@ def reindex_all(db_path: Path) -> dict[str, int]:
                         "SET r.embedding = $emb",
                         {"from_id": f_id, "to_id": t_id, "emb": vec},
                     )
-            except Exception:
-                with contextlib.suppress(Exception):
-                    _execute(
-                        conn,
-                        f"MATCH (a:{from_table})-[r:{rel_type}]->(b:{to_table}) "
-                        "SET r.embedding = NULL",
-                    )
-                raise
-            counts[rel_type] = len(rels)
+                counts[rel_type] = len(rels)
+        except Exception:
+            _null_all_embeddings(conn)
+            raise
 
     return counts
 

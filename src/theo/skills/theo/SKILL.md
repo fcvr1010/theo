@@ -196,6 +196,10 @@ When updating nodes, do not stack notes after notes, re-evaluate the entire cont
 
 `notes` are not meant to be a git diff summary. Never store things like "Version abc5g added this parameter" or "Name of the parameter change to X in version 95msgl". `notes` capture conceptual, non-trivial aspects in a succinct way.
 
+## No embedded newlines in notes
+
+Never write `\n` or multi-line strings in `description` or `notes` fields. The CSVs are exported as headerless files and KuzuDB's parallel CSV reader does not support quoted newlines -- an embedded newline causes `theo_reload` to fail. Keep all field values on a single logical line, using prose flow (`.`, `;`, ` -- `) to separate thoughts instead of line breaks.
+
 ## No endless nitpicky updates
 
 The point of the semantic analysis is NOT to document every little, irrelevant detail. Do not iterate forever updating notes. Judge whether something meaningful warrants an update. If there's nothing, it's fine to say so and move on.
