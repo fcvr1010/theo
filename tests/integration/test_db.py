@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from theo._db import (
+import pytest
+
+pytestmark = pytest.mark.integration
+
+from theo._db import (  # noqa: E402
     delete_edge,
     delete_node,
     export_csv,
@@ -14,7 +18,7 @@ from theo._db import (
     upsert_edge,
     upsert_node,
 )
-from theo._schema import CSV_FILES
+from theo._schema import CSV_FILES  # noqa: E402
 
 
 class TestInitSchema:

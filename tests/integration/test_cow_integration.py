@@ -5,8 +5,12 @@ from __future__ import annotations
 import glob as glob_mod
 from pathlib import Path
 
-from theo._cow import abort_write, begin_write, commit_write
-from theo._db import run_query, upsert_node
+import pytest
+
+pytestmark = pytest.mark.integration
+
+from theo._cow import abort_write, begin_write, commit_write  # noqa: E402
+from theo._db import run_query, upsert_node  # noqa: E402
 
 
 class TestCowLifecycle:
