@@ -35,6 +35,25 @@ from theo.cli._common import ensure_db, load_project
 _log = logging.getLogger(__name__)
 
 
+def _record_indexed_commit(csv_dir: Path) -> None:
+    """Record current git HEAD as ``last_indexed_commit`` in ``config.json``.
+
+    Called after every successful write so ``theo_stats``'s ``is_stale`` flag
+    actually reflects whether the graph has been touched since the last
+    commit.  Any failure here (missing config, unreadable JSON, disk full) is
+    swallowed and logged: the data write has already committed and the
+    freshness flag is advisory — we never want a config-update glitch to
+    surface as a failed upsert to the caller.
+    """
+    config_path = csv_dir / "config.json"
+    try:
+        config = json.loads(config_path.read_text())
+        config["last_indexed_commit"] = head_commit(csv_dir.parent)
+        config_path.write_text(json.dumps(config, indent=2) + "\n")
+    except Exception:
+        _log.exception("Failed to update last_indexed_commit in %s", config_path)
+
+
 def _run_write(
     db_path: Path,
     csv_dir: Path,
@@ -47,9 +66,12 @@ def _run_write(
     from ``op`` roll back the temporary DB; unexpected exceptions are
     captured and also roll back, so the on-disk DB is never left half-written.
 
+    On success, ``last_indexed_commit`` in ``config.json`` is bumped to the
+    current git HEAD so ``theo_stats`` reports an accurate ``is_stale``.
+
     Consolidating this here means validation (tables, PKs, missing endpoints)
     lives exactly once — in the ``_db.py`` primitive — and the MCP handlers
-    stay thin: COW bookkeeping and CSV export, nothing else.
+    stay thin: COW bookkeeping, CSV export, and freshness bookkeeping.
     """
     tmp_path = begin_write(db_path)
     try:
@@ -59,6 +81,7 @@ def _run_write(
             return result
         commit_write(tmp_path, db_path)
         export_csv(db_path, csv_dir)
+        _record_indexed_commit(csv_dir)
         return result
     except Exception as exc:
         with contextlib.suppress(Exception):

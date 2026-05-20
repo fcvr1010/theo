@@ -112,6 +112,35 @@ class TestHandleTheoUpsertNode:
         result = handle_theo_upsert_node(db_path, csv_dir, "Concept", {"name": "no id"})
         assert result["status"] == "error"
 
+    def test_updates_last_indexed_commit_on_success(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        config_path = csv_dir / "config.json"
+
+        with patch("theo.cli.serve.head_commit", return_value="deadbeef"):
+            result = handle_theo_upsert_node(
+                db_path,
+                csv_dir,
+                "Concept",
+                {"id": "fresh", "name": "Fresh"},
+            )
+        assert result["status"] == "ok"
+
+        config = json.loads(config_path.read_text())
+        assert config["last_indexed_commit"] == "deadbeef"
+
+    def test_does_not_update_last_indexed_commit_on_error(self, tmp_theo_project: Path) -> None:
+        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
+        csv_dir = tmp_theo_project / ".theo"
+        config_path = csv_dir / "config.json"
+        original = json.loads(config_path.read_text())["last_indexed_commit"]
+
+        with patch("theo.cli.serve.head_commit", return_value="should-not-stick"):
+            result = handle_theo_upsert_node(db_path, csv_dir, "Bogus", {"id": "x"})
+        assert result["status"] == "error"
+
+        assert json.loads(config_path.read_text())["last_indexed_commit"] == original
+
 
 class TestHandleTheoUpsertEdge:
     def test_creates_edge_and_exports_csv(self, tmp_theo_project: Path) -> None:
