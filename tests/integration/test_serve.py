@@ -14,6 +14,7 @@ from theo.cli._common import Project, ensure_db
 from theo.cli.serve import (
     handle_theo_delete_edge,
     handle_theo_delete_node,
+    handle_theo_mark_indexed,
     handle_theo_query,
     handle_theo_reload,
     handle_theo_search,
@@ -112,33 +113,41 @@ class TestHandleTheoUpsertNode:
         result = handle_theo_upsert_node(db_path, csv_dir, "Concept", {"name": "no id"})
         assert result["status"] == "error"
 
-    def test_updates_last_indexed_commit_on_success(self, tmp_theo_project: Path) -> None:
-        db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
-        csv_dir = tmp_theo_project / ".theo"
-        config_path = csv_dir / "config.json"
-
-        with patch("theo.cli.serve.head_commit", return_value="deadbeef"):
-            result = handle_theo_upsert_node(
-                db_path,
-                csv_dir,
-                "Concept",
-                {"id": "fresh", "name": "Fresh"},
-            )
-        assert result["status"] == "ok"
-
-        config = json.loads(config_path.read_text())
-        assert config["last_indexed_commit"] == "deadbeef"
-
-    def test_does_not_update_last_indexed_commit_on_error(self, tmp_theo_project: Path) -> None:
+    def test_does_not_touch_last_indexed_commit(self, tmp_theo_project: Path) -> None:
+        # last_indexed_commit is an explicit certification (theo_mark_indexed),
+        # not a side effect of writes. A successful upsert must leave it untouched.
         db_path = tmp_theo_project / ".theo" / "db" / "theo.db"
         csv_dir = tmp_theo_project / ".theo"
         config_path = csv_dir / "config.json"
         original = json.loads(config_path.read_text())["last_indexed_commit"]
 
-        with patch("theo.cli.serve.head_commit", return_value="should-not-stick"):
-            result = handle_theo_upsert_node(db_path, csv_dir, "Bogus", {"id": "x"})
-        assert result["status"] == "error"
+        with patch("theo.cli.serve.head_commit", return_value="must-not-stick"):
+            result = handle_theo_upsert_node(db_path, csv_dir, "Concept", {"id": "x", "name": "X"})
+        assert result["status"] == "ok"
 
+        assert json.loads(config_path.read_text())["last_indexed_commit"] == original
+
+
+class TestHandleTheoMarkIndexed:
+    def test_writes_head_to_config(self, tmp_theo_project: Path) -> None:
+        config_path = tmp_theo_project / ".theo" / "config.json"
+
+        with patch("theo.cli.serve.head_commit", return_value="deadbeef"):
+            result = handle_theo_mark_indexed(config_path)
+
+        assert result == {"status": "ok", "last_indexed_commit": "deadbeef"}
+        assert json.loads(config_path.read_text())["last_indexed_commit"] == "deadbeef"
+
+    def test_errors_when_head_unresolvable(self, tmp_theo_project: Path) -> None:
+        config_path = tmp_theo_project / ".theo" / "config.json"
+        original = json.loads(config_path.read_text())["last_indexed_commit"]
+
+        with patch("theo.cli.serve.head_commit", return_value=None):
+            result = handle_theo_mark_indexed(config_path)
+
+        assert result["status"] == "error"
+        assert "HEAD" in result["detail"]
+        # On error, the on-disk flag must be untouched.
         assert json.loads(config_path.read_text())["last_indexed_commit"] == original
 
 

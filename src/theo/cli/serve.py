@@ -1,7 +1,7 @@
 """``theo serve`` -- MCP server with stdio transport.
 
-Exposes eight tools: ``theo_stats``, ``theo_query``, ``theo_search``,
-``theo_reload``, ``theo_upsert_node``, ``theo_upsert_edge``,
+Exposes nine tools: ``theo_stats``, ``theo_mark_indexed``, ``theo_query``,
+``theo_search``, ``theo_reload``, ``theo_upsert_node``, ``theo_upsert_edge``,
 ``theo_delete_node``, and ``theo_delete_edge``.
 """
 
@@ -35,25 +35,6 @@ from theo.cli._common import ensure_db, load_project
 _log = logging.getLogger(__name__)
 
 
-def _record_indexed_commit(csv_dir: Path) -> None:
-    """Record current git HEAD as ``last_indexed_commit`` in ``config.json``.
-
-    Called after every successful write so ``theo_stats``'s ``is_stale`` flag
-    actually reflects whether the graph has been touched since the last
-    commit.  Any failure here (missing config, unreadable JSON, disk full) is
-    swallowed and logged: the data write has already committed and the
-    freshness flag is advisory — we never want a config-update glitch to
-    surface as a failed upsert to the caller.
-    """
-    config_path = csv_dir / "config.json"
-    try:
-        config = json.loads(config_path.read_text())
-        config["last_indexed_commit"] = head_commit(csv_dir.parent)
-        config_path.write_text(json.dumps(config, indent=2) + "\n")
-    except Exception:
-        _log.exception("Failed to update last_indexed_commit in %s", config_path)
-
-
 def _run_write(
     db_path: Path,
     csv_dir: Path,
@@ -66,12 +47,14 @@ def _run_write(
     from ``op`` roll back the temporary DB; unexpected exceptions are
     captured and also roll back, so the on-disk DB is never left half-written.
 
-    On success, ``last_indexed_commit`` in ``config.json`` is bumped to the
-    current git HEAD so ``theo_stats`` reports an accurate ``is_stale``.
-
     Consolidating this here means validation (tables, PKs, missing endpoints)
     lives exactly once — in the ``_db.py`` primitive — and the MCP handlers
-    stay thin: COW bookkeeping, CSV export, and freshness bookkeeping.
+    stay thin: COW bookkeeping and CSV export, nothing else.
+
+    Note: ``last_indexed_commit`` is intentionally *not* bumped here.  A
+    single upsert does not mean the graph is aligned with HEAD — that is
+    something the agent certifies explicitly via ``theo_mark_indexed`` after
+    reaching a stable state.
     """
     tmp_path = begin_write(db_path)
     try:
@@ -81,7 +64,6 @@ def _run_write(
             return result
         commit_write(tmp_path, db_path)
         export_csv(db_path, csv_dir)
-        _record_indexed_commit(csv_dir)
         return result
     except Exception as exc:
         with contextlib.suppress(Exception):
@@ -98,6 +80,35 @@ def _run_write(
 # CLI) after a batch of edits to refresh the semantic index, mirroring how
 # CSVs are flushed once per batch rather than once per row.
 # ---------------------------------------------------------------------------
+
+
+def handle_theo_mark_indexed(config_path: Path) -> dict[str, Any]:
+    """Certify that the graph is aligned with the current git HEAD.
+
+    Writes the current HEAD commit into ``last_indexed_commit`` in
+    ``config.json``.  The agent calls this *deliberately* after a
+    build/update session reaches a stable state — it is not a side effect of
+    individual writes, because a single upsert does not mean the whole graph
+    reflects HEAD.
+
+    Returns ``{"status": "error", ...}`` when not in a git repo, when HEAD
+    cannot be resolved, or when the config write fails.  In those cases the
+    on-disk ``last_indexed_commit`` is left untouched.
+    """
+    root = config_path.parent.parent  # .theo/config.json -> project root
+    head = head_commit(root)
+    if head is None:
+        return {
+            "status": "error",
+            "detail": "Could not resolve git HEAD (not a git repo, or no commits yet).",
+        }
+    try:
+        config = json.loads(config_path.read_text())
+        config["last_indexed_commit"] = head
+        config_path.write_text(json.dumps(config, indent=2) + "\n")
+    except Exception as exc:
+        return {"status": "error", "detail": f"Failed to update config: {exc}"}
+    return {"status": "ok", "last_indexed_commit": head}
 
 
 def handle_theo_stats(
@@ -331,6 +342,27 @@ def run(project_dir_str: str) -> None:
         """
         try:
             return handle_theo_stats(db_path, csv_dir, config_path)
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
+
+    @mcp.tool()
+    def theo_mark_indexed() -> dict[str, Any]:
+        """Certify the graph is aligned with the current git HEAD.
+
+        Call after an update/build session reaches a stable state and the
+        graph reflects the codebase at HEAD.  This bumps
+        ``last_indexed_commit`` in ``config.json`` so ``theo_stats`` reports
+        ``is_stale = false`` until HEAD moves again.
+
+        Do NOT call this after isolated upserts — the flag is a deliberate
+        certification of whole-graph alignment, not a side effect of writes.
+
+        Returns ``{"status": "ok", "last_indexed_commit": "<hash>"}`` on
+        success, or ``{"status": "error", "detail": ...}`` if HEAD cannot be
+        resolved or the config write fails.
+        """
+        try:
+            return handle_theo_mark_indexed(config_path)
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
 

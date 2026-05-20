@@ -48,6 +48,18 @@ theo_stats() -> dict
 
 Returns: `node_counts`, `edge_counts`, `last_indexed_commit`, `head_commit`, `is_stale`.
 
+## `theo_mark_indexed`
+
+```
+theo_mark_indexed() -> dict
+```
+
+Certify that the graph is aligned with the current git HEAD. Writes HEAD into `last_indexed_commit` so the next `theo_stats` call reports `is_stale = false` until HEAD moves.
+
+This is an **explicit, deliberate certification** -- not a side effect of writes. A single `theo_upsert_*` or `theo_delete_*` does not align the whole graph with HEAD, so individual writes do not bump the flag. Call `theo_mark_indexed` only after a build/update session has reached the stable state described in "Updating/building the graph" below.
+
+Returns `{"status": "ok", "last_indexed_commit": "<hash>"}` on success, or `{"status": "error", "detail": ...}` if HEAD cannot be resolved (e.g. not in a git repo) or the config write fails -- in either error case the on-disk flag is untouched.
+
 ## `theo_query`
 
 ```
@@ -175,6 +187,8 @@ Proceed iteratively until you reach a stable state and no relevant modifications
 When the diff shows deleted files or a refactor that removes a concept, prune the graph accordingly: use `theo_delete_edge` to remove links that no longer hold, and `theo_delete_node` for files or concepts that no longer exist. If a `Concept` still has children, re-parent them first (upsert new `PartOf`/`BelongsTo` edges, then delete the old ones) before deleting the old `Concept`.
 
 Set `git_revision` on every node and edge you touch to the current git HEAD.
+
+Once stable, call `theo_mark_indexed()` to certify that the graph reflects HEAD. This is the only thing that flips `is_stale` back to `false` -- writes alone do not. Do this only when you are confident the alignment is complete; if you bailed out mid-way (e.g. ran out of context, deferred a subsystem to a later session), leave the flag stale so the next session knows to keep going.
 
 Once you're done, the graph captures months worth of knowledge that are readily available for human developers and coding agents alike. Well done!
 
